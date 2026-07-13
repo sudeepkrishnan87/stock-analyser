@@ -1,0 +1,39 @@
+name: Deploy to AWS EC2
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  deploy:
+    name: Build & deploy
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host:     ${{ secrets.EC2_HOST }}
+          username: ubuntu
+          key:      ${{ secrets.EC2_SSH_KEY }}
+          timeout:  300s
+          script: |
+            set -e
+            cd /opt/stockbot
+
+            echo "→ Pulling latest code..."
+            git pull origin main
+
+            echo "→ Building images..."
+            docker compose build api frontend
+
+            echo "→ Restarting services..."
+            docker compose up -d
+
+            echo "→ Waiting for API to start..."
+            sleep 15
+            docker compose exec -T api curl -sf http://localhost:8000/api/health > /dev/null
+            echo "✅ Deploy complete at $(date)"

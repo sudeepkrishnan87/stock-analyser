@@ -1,0 +1,38 @@
+# Secrets — NEVER commit these
+backend/.env
+backend/.env.local
+*.pem
+*.key
+*.p12
+
+# Trade state (local only)
+backend/data/trades.json
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+.mypy_cache/
+
+# Node / Frontend
+frontend/node_modules/
+frontend/dist/
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE / Local tool config
+.vscode/settings.json
+.idea/
+.claude/
+
+# SSL certs (managed by certbot on server)
+nginx/certs/
