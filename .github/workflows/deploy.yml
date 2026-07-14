@@ -28,12 +28,12 @@ jobs:
             git pull origin main
 
             echo "→ Building images..."
-            docker compose build api frontend
+            sudo docker compose build api frontend
 
             echo "→ Restarting services..."
-            docker compose up -d
+            sudo docker compose up -d
 
-            echo "→ Waiting for API to start..."
+            echo "→ Waiting for API..."
             sleep 15
-            docker compose exec -T api curl -sf http://localhost:8000/api/health > /dev/null
+            sudo docker compose exec -T api curl -sf http://localhost:8000/api/health > /dev/null
             echo "✅ Deploy complete at $(date)"
