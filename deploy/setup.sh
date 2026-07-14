@@ -49,14 +49,19 @@ sudo systemctl enable docker
 # ── 3. Install AWS CLI (for Parameter Store) ─────────────────────
 echo "[3/8] Installing AWS CLI..."
 sudo apt-get install -y -qq unzip
-curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o /tmp/awscliv2.zip
-unzip -q /tmp/awscliv2.zip -d /tmp && sudo /tmp/aws/install && rm -rf /tmp/aws /tmp/awscliv2.zip
+if ! command -v aws &>/dev/null; then
+    curl -fsSL "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o /tmp/awscliv2.zip
+    unzip -q /tmp/awscliv2.zip -d /tmp && sudo /tmp/aws/install && rm -rf /tmp/aws /tmp/awscliv2.zip
+else
+    echo "  AWS CLI already installed, skipping"
+fi
 
 # ── 4. Harden SSH ────────────────────────────────────────────────
 echo "[4/8] Hardening SSH..."
 sudo sed -i 's/#PermitRootLogin yes/PermitRootLogin no/' /etc/ssh/sshd_config
 sudo sed -i 's/PasswordAuthentication yes/PasswordAuthentication no/' /etc/ssh/sshd_config
-sudo systemctl reload sshd
+# Ubuntu 24.04 uses 'ssh', older versions use 'sshd'
+sudo systemctl reload ssh 2>/dev/null || sudo systemctl reload sshd 2>/dev/null || true
 
 # ── 5. Firewall ───────────────────────────────────────────────────
 echo "[5/8] Configuring UFW firewall..."
