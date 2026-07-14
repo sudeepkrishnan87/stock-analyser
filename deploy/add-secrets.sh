@@ -12,7 +12,7 @@
 # ════════════════════════════════════════════════════════════════════
 set -euo pipefail
 
-REGION="ap-south-1"
+REGION="eu-north-1"
 PREFIX="/stockbot"
 
 put() {

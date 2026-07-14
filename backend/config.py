@@ -29,7 +29,7 @@ def _aws_param(name: str, default: str = "") -> str:
 
     try:
         import boto3
-        ssm = boto3.client("ssm", region_name=os.getenv("AWS_REGION", "ap-south-1"))
+        ssm = boto3.client("ssm", region_name=os.getenv("AWS_REGION", "eu-north-1"))
         response = ssm.get_parameter(Name=f"/stockbot/{name}", WithDecryption=True)
         return response["Parameter"]["Value"]
     except Exception as e:
