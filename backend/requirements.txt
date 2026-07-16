@@ -30,3 +30,4 @@ APScheduler==3.11.2
 python-dotenv>=1.0.1
 pydantic>=2.6.1
 pytz>=2024.1
+pyotp>=2.9.0

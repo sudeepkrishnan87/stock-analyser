@@ -49,6 +49,23 @@ def _get_active_broker():
         return None
 
 
+def job_auto_login():
+    """8:30 AM — Auto-login to Zerodha so token is ready before market open."""
+    logger.info("[SCHEDULER] Running automated Zerodha login...")
+    from services.auto_auth_service import auto_login_zerodha_sync
+    from services import alert_service
+    success, message = auto_login_zerodha_sync()
+    if success:
+        logger.info(f"[SCHEDULER] {message}")
+    else:
+        logger.error(f"[SCHEDULER] Auto-login failed: {message}")
+        alert_service.send_alert(
+            "⚠️ Jarvis: Zerodha Login Failed",
+            f"Auto-login at 8:30 AM failed.\nReason: {message}\n\nManual auth needed: /api/auth/login-url",
+            via_email=True, via_whatsapp=False,
+        )
+
+
 def job_premarket_scan():
     """09:00 AM — Fetch overnight data, screen fundamentals, build watchlist."""
     logger.info("[SCHEDULER] Pre-market scan starting...")
@@ -245,6 +262,12 @@ def start_scheduler():
         return
 
     _scheduler = BackgroundScheduler(timezone=IST)
+
+    # Auto-login at 8:30 AM (before market open)
+    _scheduler.add_job(
+        job_auto_login, CronTrigger(day_of_week="mon-fri", hour=8, minute=30, timezone=IST),
+        id="auto_login", replace_existing=True,
+    )
 
     # Pre-market (weekdays 9:00 AM IST)
     _scheduler.add_job(

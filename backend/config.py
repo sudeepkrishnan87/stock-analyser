@@ -46,6 +46,10 @@ class Settings:
     KITE_API_KEY: str = _aws_param("KITE_API_KEY")
     KITE_API_SECRET: str = _aws_param("KITE_API_SECRET")
     KITE_REDIRECT_URL: str = _aws_param("KITE_REDIRECT_URL", "http://localhost:8000/api/auth/callback")
+    # Auto-login credentials (optional — enables fully automated daily auth)
+    ZERODHA_USER_ID: str = _aws_param("ZERODHA_USER_ID")
+    ZERODHA_PASSWORD: str = _aws_param("ZERODHA_PASSWORD")
+    ZERODHA_TOTP_SECRET: str = _aws_param("ZERODHA_TOTP_SECRET")
 
     # ── Fyers ────────────────────────────────────────────────────────────────
     FYERS_APP_ID: str = _aws_param("FYERS_APP_ID")
