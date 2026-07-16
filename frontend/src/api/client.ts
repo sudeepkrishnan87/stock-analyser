@@ -1,5 +1,5 @@
 import axios, { type InternalAxiosRequestConfig } from "axios";
-import type { StockAnalysisResponse } from "../types";
+import type { StockAnalysisResponse, PendingSignal } from "../types";
 
 // ── API key must match API_SECRET_KEY in backend .env ─────────────────────
 // Store in localStorage so you only paste it once
@@ -117,6 +117,22 @@ export async function exitTrade(symbol: string) {
 
 export async function monitorPositions() {
   const { data } = await api.post("/trading/monitor");
+  return data;
+}
+
+// ── Pending signals (human approval gate) ───────────────────────────────────
+export async function getPendingSignals(): Promise<{ count: number; signals: PendingSignal[] }> {
+  const { data } = await api.get("/signals/pending");
+  return data;
+}
+
+export async function approveSignal(id: string) {
+  const { data } = await api.post(`/signals/${id}/approve`);
+  return data;
+}
+
+export async function rejectSignal(id: string) {
+  const { data } = await api.post(`/signals/${id}/reject`);
   return data;
 }
 

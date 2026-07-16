@@ -11,7 +11,7 @@ This file orients Claude Code (or any engineer) fast. Deep dives live in `docs/`
 
 - Not multi-user. One `X-API-Key` gates everything.
 - Not backed by a database. All state is one JSON file (`backend/data/trades.json`) plus in-memory process state.
-- Not paper-trading by default. `services/trading_service.enter_trade()` places **real market orders**; the scheduler's 15-minute intraday job can auto-enter STRONG BUY signals with zero human click. `dry_run=True` / `POST /api/trading/dry-run` is the only simulation path, and it's opt-in per call, not a global switch.
+- Not paper-trading by default. `services/trading_service.enter_trade()` places **real market orders** when called. As of 2026-07-16, the scheduler never calls it automatically — the 15-minute intraday job only alerts on STRONG BUY signals; entering a trade always requires an explicit, human-initiated call to the trading API. `dry_run=True` / `POST /api/trading/dry-run` is the only simulation path, and it's opt-in per call, not a global switch.
 - The Anthropic/Claude integration (`services/claude_service.py`) is narrative-only — it explains a decision already made by deterministic Python. It never decides a trade.
 
 ## Repo map

@@ -19,7 +19,7 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 from routers import auth, stocks, fii_dii
-from routers import scanner, trading, alerts as alerts_router
+from routers import scanner, trading, alerts as alerts_router, signals
 
 # ── Paths that skip API-key check ─────────────────────────────────────────────
 # Broker callbacks come from Zerodha/Fyers servers — they can't send our key.
@@ -130,6 +130,7 @@ app.include_router(fii_dii.router, prefix="/api/fii-dii", tags=["FII/DII"])
 app.include_router(scanner.router,       prefix="/api/scanner",  tags=["Scanner"])
 app.include_router(trading.router,       prefix="/api/trading",  tags=["Trading"])
 app.include_router(alerts_router.router, prefix="/api/alerts",   tags=["Alerts"])
+app.include_router(signals.router,       prefix="/api/signals",  tags=["Signals"])
 
 
 @app.get("/api/health")

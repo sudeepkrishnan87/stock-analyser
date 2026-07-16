@@ -4,10 +4,15 @@ Background scheduler: runs automated scans and trading jobs during market hours.
 Schedule (IST):
   09:00 AM  — Pre-market scan (fetch data, run fundamentals overnight)
   09:15 AM  — Market open: first intraday scan
-  Every 15m  — Intraday scan + position monitor (09:30 – 15:15)
+  Every 15m  — Intraday scan (alert-only) + position monitor (09:30 – 15:15)
   03:15 PM  — Exit all intraday positions
   03:35 PM  — Daily P&L report email + WhatsApp
   Weekdays only (Mon–Fri), no scan on NSE holidays.
+
+No job in this file ever calls trading_service.enter_trade() — new entries always
+require an explicit human-approved call to the trading API. Position monitoring/exit
+of *already open* positions (SL, target, trailing stop, EOD square-off) still runs
+unattended, since those only manage risk on trades a human already approved.
 
 Uses APScheduler (BackgroundScheduler). Starts with the FastAPI app lifecycle.
 """
@@ -115,7 +120,7 @@ def job_intraday_scan():
     if not broker:
         return
 
-    from services import screener_service, trading_service, alert_service
+    from services import screener_service, trading_service, alert_service, signal_service
 
     # ── Monitor existing positions first ─────────────────────────────────────
     try:
@@ -136,27 +141,22 @@ def job_intraday_scan():
             interval="15minute",
             days_back=30,
         )
-        for r in results[:3]:   # act on top 3
+        for r in results[:3]:   # alert on top 3
             if r.get("signal") in ("BUY", "STRONG BUY") and r.get("trade_suggestion"):
-                ts = r["trade_suggestion"]
-                # Alert regardless; auto-trade only if STRONG BUY + breakout
+                # Alert + queue for approval — no trade is ever placed without explicit
+                # human approval. See docs/SECURITY.md "no global paper-trading switch" finding.
                 if r.get("breakout_signal") and r["signal"] == "STRONG BUY":
                     alert_service.alert_breakout(
                         r["symbol"], r["breakout_signal"],
                         fundamentals=r.get("fundamentals"),
                     )
-                    # Auto-enter if allowed
-                    ok, _ = trading_service.can_enter_trade()
-                    if ok:
-                        trading_service.enter_trade(
-                            symbol=r["symbol"],
-                            direction="LONG",
-                            entry_price=ts["entry"],
-                            stop_loss=ts["stop_loss"],
-                            target=ts["target"],
-                            trade_type="INTRADAY",
-                            product="MIS",
-                        )
+                    signal_service.add_pending_signal(
+                        symbol=r["symbol"],
+                        signal=r["signal"],
+                        signal_score=r.get("signal_score", 0),
+                        trade_suggestion=r["trade_suggestion"],
+                        breakout_signal=r.get("breakout_signal"),
+                    )
     except Exception as e:
         logger.error(f"[SCHEDULER] Intraday scan error: {e}")
 

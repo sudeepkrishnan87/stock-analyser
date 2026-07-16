@@ -68,7 +68,7 @@ State (`Position`, `ClosedTrade` dataclasses) lives in a module-level singleton,
 |---|---|---|
 | 08:30 | `job_auto_login` | Scripted Zerodha web-login via stored password + live TOTP code (see `docs/SECURITY.md` §Zerodha auto-login) |
 | 09:00 | `job_premarket_scan` | Full watchlist + fundamentals, `min_score=60`, emails top 5 — **alert only, no auto-trade** |
-| 09:15–15:15, every 15 min | `job_intraday_scan` | 1) `monitor_positions()` first (SL/target/trailing checks on existing positions) 2) scans top 15 watchlist symbols on 15-min candles 3) **for the top 3 results, if `signal == STRONG BUY` AND there's a confirmed trendline breakout, it alerts AND calls `trading_service.enter_trade()` directly** (`scheduler_service.py:139-159`) — this is the one fully-automated live-order path with no human click, gated only by `can_enter_trade()` |
+| 09:15–15:15, every 15 min | `job_intraday_scan` | 1) `monitor_positions()` first (SL/target/trailing checks on existing positions) 2) scans top 15 watchlist symbols on 15-min candles 3) **for the top 3 results, if `signal == STRONG BUY` AND there's a confirmed trendline breakout, it sends an alert only** (`scheduler_service.py:139-146`) — no order is ever placed automatically; entering the trade requires a separate, human-initiated call to the trading API |
 | 15:15 | `job_exit_intraday` | Square off all MIS/INTRADAY positions before close |
 | 15:35 | `job_daily_report` | P&L summary via email/WhatsApp |
 | 15:45 | `job_swing_scan` | EOD scan, `min_score=65`, emails swing setups for next-day **manual** entry (not auto-traded) |

@@ -1,6 +1,6 @@
-import { useState, useEffect } from "react";
-import type { StockAnalysisResponse } from "./types";
-import { analyzeStock, hasApiKey, checkAuthStatus, triggerAutoLogin } from "./api/client";
+import { useState, useEffect, useCallback } from "react";
+import type { StockAnalysisResponse, PendingSignal } from "./types";
+import { analyzeStock, hasApiKey, checkAuthStatus, triggerAutoLogin, getPendingSignals } from "./api/client";
 import LoginGate from "./components/LoginGate";
 import Header from "./components/Header";
 import StockSearch from "./components/StockSearch";
@@ -11,6 +11,11 @@ import AIAnalysisPanel from "./components/AIAnalysisPanel";
 import TechnicalIndicatorsPanel from "./components/TechnicalIndicatorsPanel";
 import CandlestickPatterns from "./components/CandlestickPatterns";
 import QuarterlyCard from "./components/QuarterlyCard";
+import SignalsPanel from "./components/SignalsPanel";
+import { useFaviconBadge } from "./hooks/useFaviconBadge";
+
+const BASE_TITLE = "AI Stock Analyser — Indian Markets";
+const SIGNALS_POLL_MS = 15_000;
 
 export default function App() {
   // ── App-level auth (API key gate) ──────────────────────────────────────────
@@ -26,6 +31,19 @@ export default function App() {
   const [analysis, setAnalysis] = useState<StockAnalysisResponse | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loadingStep, setLoadingStep] = useState("");
+
+  // ── Tabs + pending signal approvals ─────────────────────────────────────────
+  const [activeTab, setActiveTab] = useState<"research" | "signals">("research");
+  const [pendingSignals, setPendingSignals] = useState<PendingSignal[]>([]);
+
+  const refreshPendingSignals = useCallback(() => {
+    if (!hasApiKey()) return;
+    getPendingSignals()
+      .then((data) => setPendingSignals(data.signals))
+      .catch(() => {});
+  }, []);
+
+  useFaviconBadge(pendingSignals.length, BASE_TITLE);
 
   // On mount: if a key is already stored, silently verify it.
   useEffect(() => {
@@ -50,6 +68,15 @@ export default function App() {
       })
       .finally(() => setCheckingKey(false));
   }, []);
+
+  // Poll for pending trade signals while logged in — this is what powers the
+  // Signals tab badge and favicon badge, regardless of which tab is active.
+  useEffect(() => {
+    if (!appLoggedIn) return;
+    refreshPendingSignals();
+    const timer = setInterval(refreshPendingSignals, SIGNALS_POLL_MS);
+    return () => clearInterval(timer);
+  }, [appLoggedIn, refreshPendingSignals]);
 
   const handleLogin = (zerodhaAuthenticated: boolean) => {
     setAppLoggedIn(true);
@@ -130,6 +157,9 @@ export default function App() {
         isAuthenticated={isAuthenticated}
         onTokenSetup={() => setShowTokenSetup(true)}
         onLogout={handleLogout}
+        activeTab={activeTab}
+        onTabChange={setActiveTab}
+        pendingSignalCount={pendingSignals.length}
       />
 
       {showTokenSetup && (
@@ -142,6 +172,19 @@ export default function App() {
         />
       )}
 
+      {activeTab === "signals" && (
+        <main className="max-w-3xl mx-auto px-4 py-6">
+          <div className="mb-4">
+            <h2 className="text-xl font-bold">Pending Signals</h2>
+            <p className="text-slate-500 text-sm">
+              Jarvis found these — nothing gets traded until you approve it.
+            </p>
+          </div>
+          <SignalsPanel signals={pendingSignals} onResolved={refreshPendingSignals} />
+        </main>
+      )}
+
+      {activeTab === "research" && (
       <main className="max-w-7xl mx-auto px-4 py-6 space-y-6">
         <StockSearch onSearch={handleSearch} loading={loading} />
 
@@ -199,6 +242,7 @@ export default function App() {
           </div>
         )}
       </main>
+      )}
     </div>
   );
 }

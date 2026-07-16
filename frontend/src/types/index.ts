@@ -60,6 +60,21 @@ export interface QuarterlyResult {
   eps?: number;
 }
 
+export interface PendingSignal {
+  id: string;
+  symbol: string;
+  signal: string;
+  signal_score: number;
+  entry: number;
+  stop_loss: number;
+  target: number;
+  rr_ratio: number;
+  breakout_signal?: string | null;
+  created_at: string;
+  expires_at: string;
+  status: "PENDING" | "APPROVED" | "REJECTED" | "EXPIRED";
+}
+
 export interface AIAnalysis {
   signal: "BUY" | "SELL" | "HOLD";
   confidence: "HIGH" | "MEDIUM" | "LOW";
