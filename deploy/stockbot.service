@@ -6,7 +6,7 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=ubuntu
+User=sudeep
 WorkingDirectory=/opt/stockbot
 ExecStart=/usr/bin/docker compose up --build
 ExecStop=/usr/bin/docker compose down
