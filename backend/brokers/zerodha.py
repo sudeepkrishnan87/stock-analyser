@@ -18,7 +18,7 @@ INTERVAL_MAP = {
     "60minute": "60minute",
     "day":      "day",
     "week":     "week",
-    "month":    "month",
+    # "month" is not a valid Kite interval — handled separately via daily resample
 }
 
 
@@ -65,6 +65,10 @@ class ZerodhaBroker(BaseBroker):
     def fetch_historical(self, instrument_key: str, interval: str, days_back: int) -> List[Dict]:
         kite = self._client()
         to_date = datetime.now(IST)
+
+        if interval == "month":
+            return self._fetch_monthly(kite, instrument_key, days_back)
+
         from_date = to_date - timedelta(days=days_back)
         kite_interval = INTERVAL_MAP.get(interval, interval)
         data = kite.historical_data(
@@ -74,6 +78,32 @@ class ZerodhaBroker(BaseBroker):
             interval=kite_interval,
         )
         return data
+
+    def _fetch_monthly(self, kite: KiteConnect, instrument_key: str, days_back: int) -> List[Dict]:
+        """Kite has no monthly interval — fetch daily and resample to calendar months."""
+        import pandas as pd
+        to_date = datetime.now(IST)
+        from_date = to_date - timedelta(days=days_back)
+        daily = kite.historical_data(
+            instrument_token=int(instrument_key),
+            from_date=from_date.strftime("%Y-%m-%d %H:%M:%S"),
+            to_date=to_date.strftime("%Y-%m-%d %H:%M:%S"),
+            interval="day",
+        )
+        if not daily:
+            return []
+        df = pd.DataFrame(daily)
+        df["date"] = pd.to_datetime(df["date"])
+        df = df.set_index("date")
+        monthly = df.resample("ME").agg({
+            "open":   "first",
+            "high":   "max",
+            "low":    "min",
+            "close":  "last",
+            "volume": "sum",
+        }).dropna()
+        monthly = monthly.reset_index()
+        return monthly.to_dict(orient="records")
 
     def fetch_ltp(self, symbol: str, exchange: str = "NSE") -> float:
         kite = self._client()
