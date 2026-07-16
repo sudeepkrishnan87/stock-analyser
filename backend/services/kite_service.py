@@ -56,6 +56,10 @@ def fetch_historical(
     to_date = datetime.now(IST)
     from_date = to_date - timedelta(days=days_back)
 
+    # Kite has no monthly interval — fetch daily and resample
+    if interval == "month":
+        return _fetch_monthly(kite, instrument_token, from_date, to_date)
+
     data = kite.historical_data(
         instrument_token=instrument_token,
         from_date=from_date.strftime("%Y-%m-%d %H:%M:%S"),
@@ -63,6 +67,25 @@ def fetch_historical(
         interval=interval,
     )
     return data
+
+
+def _fetch_monthly(kite, instrument_token: int, from_date, to_date) -> List[Dict]:
+    import pandas as pd
+    daily = kite.historical_data(
+        instrument_token=instrument_token,
+        from_date=from_date.strftime("%Y-%m-%d %H:%M:%S"),
+        to_date=to_date.strftime("%Y-%m-%d %H:%M:%S"),
+        interval="day",
+    )
+    if not daily:
+        return []
+    df = pd.DataFrame(daily)
+    df["date"] = pd.to_datetime(df["date"])
+    df = df.set_index("date")
+    monthly = df.resample("ME").agg(
+        {"open": "first", "high": "max", "low": "min", "close": "last", "volume": "sum"}
+    ).dropna().reset_index()
+    return monthly.to_dict(orient="records")
 
 
 def fetch_ltp(symbol: str) -> float:
