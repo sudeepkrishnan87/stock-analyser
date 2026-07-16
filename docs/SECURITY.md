@@ -6,11 +6,11 @@ Audited 2026-07-16 via full reverse-engineering pass. Status legend: 🔴 open �
 
 ## Findings
 
-### 🔴 ~~Real API_SECRET_KEY committed to git~~ → ✅ fixed, rotation pending
+### ✅ Fixed: real API_SECRET_KEY committed to git, now rotated
 `backend/.env.example` contained a real `secrets.token_urlsafe(32)`-shaped key (not a `your_x_here` placeholder) since the initial commit, in a **public** repo. Anyone with repo access has always had it.
-- **Fixed in this pass**: `.env.example` now uses a placeholder.
-- **You still need to do**: rotate the live key in AWS SSM + your local `.env` + browser localStorage. Exact commands were given separately in this session. Until you rotate, the old key is still valid in production.
-- **Also worth doing eventually**: purge it from git history (`git filter-repo`) since it's a public repo — this rewrites history and breaks existing clones/forks, so only do it deliberately, not as a reflex.
+- A first pass placeholder-ed `.env.example` locally but the change was never actually committed — the real key stayed live on `main` until commit `fb060b6` (2026-07-16) fixed it for real.
+- **Also done (2026-07-16)**: the live `API_SECRET_KEY` was rotated in AWS SSM (`/stockbot/API_SECRET_KEY`) and locally in `backend/.env`. Log out and back in on the frontend with the new key — the old one now 401s.
+- **Still open**: the old key remains readable in git history (old commits before `fb060b6`) since it's a public repo. Rotation makes the old value harmless (it's no longer valid anywhere), but if you want the value itself gone from history, that's a separate `git filter-repo` decision — rewrites history and breaks existing clones/forks, so only do it deliberately, not as a reflex.
 
 ### ✅ Fixed: non-constant-time API key comparison
 `main.py` compared `api_key != expected` with plain string equality — theoretically vulnerable to a timing attack that leaks the key byte-by-byte. Now uses `hmac.compare_digest()`.
