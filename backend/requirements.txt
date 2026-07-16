@@ -9,7 +9,7 @@ fyers-apiv3>=3.0.0
 # ── Data & Analysis ───────────────────────────────────────────────────────────
 pandas>=2.2.0
 numpy>=1.26.3
-pandas-ta @ git+https://github.com/twopirllc/pandas-ta.git@development
+pandas-ta @ https://github.com/twopirllc/pandas-ta/archive/refs/heads/development.zip
 scipy>=1.12.0
 yfinance==1.4.1
 
