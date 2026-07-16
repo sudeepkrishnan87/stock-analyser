@@ -37,6 +37,21 @@ async def lifespan(app: FastAPI):
     logger.info(f"Starting StockBot API — environment={ENVIRONMENT}")
     from services.scheduler_service import start_scheduler, stop_scheduler
     start_scheduler()
+
+    # Auto-login on startup so a backend restart doesn't leave us unauthenticated
+    # until the next 8:30 AM scheduler run.
+    import asyncio
+    from services.auto_auth_service import auto_login_zerodha
+    async def _startup_login():
+        await asyncio.sleep(2)  # give the server a moment to finish binding
+        if settings.ZERODHA_USER_ID and settings.ZERODHA_PASSWORD and settings.ZERODHA_TOTP_SECRET:
+            logger.info("Startup auto-login: attempting Zerodha authentication...")
+            ok, msg = await auto_login_zerodha()
+            logger.info(f"Startup auto-login: {msg}")
+        else:
+            logger.info("Startup auto-login skipped — ZERODHA_USER_ID/PASSWORD/TOTP_SECRET not configured.")
+    asyncio.create_task(_startup_login())
+
     yield
     stop_scheduler()
     logger.info("StockBot API shut down.")
@@ -64,7 +79,7 @@ app.add_middleware(
     allow_origins=settings.CORS_ORIGINS,
     allow_credentials=True,
     allow_methods=["GET", "POST", "DELETE"],
-    allow_headers=["Content-Type", "Authorization"],
+    allow_headers=["Content-Type", "Authorization", "X-API-Key"],
 )
 
 # ── API key auth middleware ────────────────────────────────────────────────

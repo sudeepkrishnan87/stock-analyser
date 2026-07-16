@@ -116,6 +116,19 @@ def clear_access_token():
     return TokenStatus(authenticated=False, message="Token cleared.")
 
 
+@router.post("/auto-login")
+async def trigger_auto_login():
+    """
+    Manually trigger the Zerodha auto-login right now (don't wait for 8:30 AM).
+    Requires ZERODHA_USER_ID, ZERODHA_PASSWORD, ZERODHA_TOTP_SECRET in config.
+    """
+    from services.auto_auth_service import auto_login_zerodha
+    ok, message = await auto_login_zerodha()
+    if ok:
+        return {"success": True, "message": message}
+    raise HTTPException(status_code=401, detail=message)
+
+
 @router.get("/exchange")
 def exchange_request_token(request_token: str = Query(...)):
     """

@@ -36,6 +36,12 @@ export async function setKiteToken(token: string): Promise<{ authenticated: bool
   return data;
 }
 
+// Trigger auto-login now (uses TOTP credentials from server config)
+export async function triggerAutoLogin(): Promise<{ success: boolean; message: string }> {
+  const { data } = await api.post("/auth/auto-login");
+  return data;
+}
+
 export async function clearKiteToken(): Promise<void> {
   await api.delete("/auth/token");
 }

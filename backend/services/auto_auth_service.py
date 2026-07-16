@@ -125,11 +125,8 @@ async def auto_login_zerodha() -> tuple[bool, str]:
 def auto_login_zerodha_sync() -> tuple[bool, str]:
     """Synchronous wrapper — used by APScheduler (which runs in threads)."""
     import asyncio
+    loop = asyncio.new_event_loop()
     try:
-        loop = asyncio.get_event_loop()
-        if loop.is_closed():
-            loop = asyncio.new_event_loop()
-            asyncio.set_event_loop(loop)
         return loop.run_until_complete(auto_login_zerodha())
-    except RuntimeError:
-        return asyncio.run(auto_login_zerodha())
+    finally:
+        loop.close()
