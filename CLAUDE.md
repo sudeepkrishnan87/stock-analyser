@@ -6,6 +6,7 @@ This file orients Claude Code (or any engineer) fast. Deep dives live in `docs/`
 
 - **[docs/TRADING_LOGIC.md](docs/TRADING_LOGIC.md)** — how a buy/sell decision is actually made: the 9-factor scoring engine, risk gates, position sizing, scheduler timeline, order lifecycle. Read this before touching `services/screener_service.py` or `services/trading_service.py`.
 - **[docs/SECURITY.md](docs/SECURITY.md)** — threat model, current findings, what's fixed vs. accepted risk, and the checklist to run before any change that touches auth, secrets, or order placement.
+- **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)** — the actual, current AWS setup: EC2 access, normal vs. manual deploy, pushing secret changes to SSM, verifying a deploy, and a troubleshooting table for the failure modes already hit in practice (stopped instance, region mismatch between EC2 and SSM, stale browser key).
 
 ## What this is NOT
 

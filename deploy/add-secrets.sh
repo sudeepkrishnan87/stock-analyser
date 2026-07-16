@@ -4,7 +4,9 @@
 #  Run this ONCE from your LOCAL Mac (not the EC2 instance).
 #
 #  Prerequisites:
-#    aws configure   (set your AWS credentials + region ap-south-1)
+#    aws configure   (set your AWS credentials — region doesn't matter here,
+#                      this script always targets eu-north-1 explicitly below,
+#                      regardless of which region your EC2 instance runs in)
 #
 #  Usage:
 #    chmod +x deploy/add-secrets.sh

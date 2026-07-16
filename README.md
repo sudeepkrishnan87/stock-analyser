@@ -184,11 +184,13 @@ All endpoints require `X-API-Key: <your_key>` header except health and broker ca
 
 ## AWS Production Deployment
 
+**See [docs/DEPLOYMENT.md](docs/DEPLOYMENT.md) for the full, current reference** — EC2 terminal access, normal vs. manual deploy, pushing `.env`/secret changes to SSM, verifying a deploy, and a troubleshooting table. The summary below is kept short on purpose; docs/DEPLOYMENT.md is the source of truth if the two ever disagree.
+
 ### Infrastructure
 
-- EC2 t3.micro (eu-north-1 Stockholm) — ~$10.45/month
+- EC2 t3.micro (**ap-south-1 Mumbai**) — ~$10.45/month
 - Nginx + Let's Encrypt SSL
-- AWS SSM Parameter Store (encrypted secrets, no `.env` on server)
+- AWS SSM Parameter Store (encrypted secrets, no `.env` on server) — **note: the SSM parameters live in `eu-north-1`, a different region than the EC2 instance itself.** This works fine (SSM calls aren't tied to instance placement) but is a historical mismatch, not a bug to "fix" by just changing a region flag — see docs/DEPLOYMENT.md for why.
 - GitHub Actions CI/CD (auto-deploy on push to `main`)
 
 ### One-time EC2 bootstrap
