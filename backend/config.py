@@ -91,7 +91,11 @@ class Settings:
     ]
     SCAN_INTERVAL_MINUTES: int = int(os.getenv("SCAN_INTERVAL_MINUTES", "15"))
 
-    CORS_ORIGINS: list = ["http://localhost:5173", "http://localhost:3000"]
+    CORS_ORIGINS: list = [
+        o.strip()
+        for o in os.getenv("CORS_ORIGINS", "http://localhost:5173,http://localhost:3000").split(",")
+        if o.strip()
+    ]
 
     # ── In-memory session tokens ─────────────────────────────────────────────
     _kite_access_token: str = ""

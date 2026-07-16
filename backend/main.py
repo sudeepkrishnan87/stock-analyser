@@ -1,3 +1,4 @@
+import hmac
 import logging
 import os
 import time
@@ -100,7 +101,7 @@ async def require_api_key(request: Request, call_next):
         logger.critical("API_SECRET_KEY is not set! Blocking all requests.")
         return JSONResponse(status_code=503, content={"detail": "Server not configured."})
 
-    if api_key != expected:
+    if not hmac.compare_digest(api_key, expected):
         ip = request.client.host if request.client else "unknown"
         logger.warning(f"Unauthorized request to {path} from {ip}")
         return JSONResponse(status_code=401, content={"detail": "Unauthorized."})

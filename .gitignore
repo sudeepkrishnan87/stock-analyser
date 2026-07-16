@@ -32,7 +32,9 @@ Thumbs.db
 # IDE / Local tool config
 .vscode/settings.json
 .idea/
-.claude/
+
+# Claude Code: shared skills/config are tracked, personal overrides are not
+**/.claude/settings.local.json
 
 # SSL certs (managed by certbot on server)
 nginx/certs/

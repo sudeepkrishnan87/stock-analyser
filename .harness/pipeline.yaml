@@ -1,0 +1,142 @@
+pipeline:
+  name: jarvis-build-deploy
+  identifier: jarvis_build_deploy
+  # Replace with your actual Harness org/project identifiers after creating them
+  # in the Harness UI (Account → Organizations → Projects).
+  projectIdentifier: <+input>
+  orgIdentifier: <+input>
+  tags: {}
+
+  properties:
+    ci:
+      codebase:
+        # Create a GitHub connector in Harness (Connectors → New Connector → GitHub)
+        # scoped to sudeepkrishnan87/stock-analyser, then reference its identifier here.
+        connectorRef: <+input>
+        repoName: stock-analyser
+        build: <+input>
+
+  stages:
+    # ── Stage 1: build & verify — the step this repo's current GitHub Actions
+    #    deploy.yml skips entirely (it goes straight to SSH + docker compose build
+    #    on the EC2 box with no pre-merge verification). This stage exists so a
+    #    broken commit fails here, before it ever reaches the trading system.
+    - stage:
+        name: Build and Verify
+        identifier: Build_and_Verify
+        type: CI
+        spec:
+          cloneCodebase: true
+          platform:
+            os: Linux
+            arch: Amd64
+          runtime:
+            type: Cloud
+            spec: {}
+          execution:
+            steps:
+              - step:
+                  type: Run
+                  name: Backend compile check
+                  identifier: backend_compile_check
+                  spec:
+                    shell: Sh
+                    image: python:3.12-slim
+                    command: |-
+                      cd backend
+                      pip install -q -r requirements.txt
+                      python -m py_compile $(find . -name "*.py" -not -path "./__pycache__/*")
+                      echo "Backend compiles cleanly."
+
+              - step:
+                  type: Run
+                  name: Frontend build
+                  identifier: frontend_build
+                  spec:
+                    shell: Sh
+                    image: node:20-slim
+                    command: |-
+                      cd frontend
+                      npm ci
+                      npm run build
+                      echo "Frontend build succeeded."
+
+              - step:
+                  type: Run
+                  name: Secret leak check
+                  identifier: secret_leak_check
+                  spec:
+                    shell: Sh
+                    image: alpine:3.20
+                    # Cheap guard against the exact incident documented in docs/SECURITY.md:
+                    # a real-looking secrets.token_urlsafe(32) value committed to .env.example.
+                    # This is a heuristic, not a substitute for a real secret scanner (consider
+                    # adding gitleaks/trufflehog as a follow-up once this scaffold is working).
+                    command: |-
+                      if grep -qE '^API_SECRET_KEY=[A-Za-z0-9_-]{30,}$' backend/.env.example; then
+                        echo "ERROR: backend/.env.example contains a real-looking secret value, not a placeholder."
+                        exit 1
+                      fi
+                      echo "No obvious real secret in .env.example."
+
+    # ── Stage 2: deploy — same operation as .github/workflows/deploy.yml
+    #    (SSH in, git pull, docker compose build/up, health check), expressed as a
+    #    Harness Custom stage so it runs through a Harness Delegate instead of a
+    #    GitHub-hosted runner. Requires: a Harness Delegate installed somewhere that
+    #    can reach the EC2 box (or run this from a delegate on the EC2 box itself),
+    #    and two Harness secrets: ec2_host, ec2_ssh_key (see .harness/README.md).
+    - stage:
+        name: Deploy to EC2
+        identifier: Deploy_to_EC2
+        type: Custom
+        spec:
+          execution:
+            steps:
+              - step:
+                  type: ShellScript
+                  name: SSH deploy
+                  identifier: ssh_deploy
+                  timeout: 10m
+                  spec:
+                    shell: Bash
+                    onDelegate: true
+                    source:
+                      type: Inline
+                      spec:
+                        script: |-
+                          set -e
+                          umask 077
+                          KEY_FILE=$(mktemp)
+                          echo "<+secrets.getValue(\"ec2_ssh_key\")>" > "$KEY_FILE"
+                          chmod 600 "$KEY_FILE"
+
+                          ssh -i "$KEY_FILE" -o StrictHostKeyChecking=accept-new \
+                            ubuntu@<+secrets.getValue("ec2_host")> bash -s <<'REMOTE'
+                          set -e
+                          cd /opt/stockbot
+                          echo "-> Pulling latest code..."
+                          git pull origin main
+
+                          echo "-> Building images..."
+                          sudo docker compose build api frontend
+
+                          echo "-> Restarting services..."
+                          sudo docker compose up -d
+
+                          echo "-> Waiting for API..."
+                          sleep 15
+                          sudo docker compose exec -T api curl -sf http://localhost:8000/api/health > /dev/null
+                          echo "Deploy complete at $(date)"
+                          REMOTE
+
+                          rm -f "$KEY_FILE"
+        when:
+          pipelineStatus: Success
+          # Only deploy from main — mirrors the `on: push: branches: [main]` trigger
+          # in .github/workflows/deploy.yml. Wire an actual Harness Trigger
+          # (Triggers → New Trigger → Webhook/Push) for push-to-main automation;
+          # this "when" clause alone only gates stage execution within a run that's
+          # already been triggered some other way.
+          condition: <+codebase.branch> == "main"
+
+  variables: []

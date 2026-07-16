@@ -1,3 +1,6 @@
+import hashlib
+import hmac
+
 from fastapi import APIRouter, HTTPException, Query
 from fastapi.responses import HTMLResponse
 from schemas import TokenRequest, TokenStatus
@@ -178,9 +181,23 @@ async def kite_postback(request: dict):
     """
     import logging
     logger = logging.getLogger(__name__)
+
+    order_id         = request.get("order_id", "")
+    order_timestamp  = request.get("order_timestamp", "")
+    checksum         = request.get("checksum", "")
+
+    # Zerodha signs every postback with sha256(order_id + order_timestamp + api_secret).
+    # Verify it before trusting anything in the payload — otherwise anyone who can
+    # reach this public endpoint can spoof an order update.
+    expected_checksum = hashlib.sha256(
+        f"{order_id}{order_timestamp}{settings.KITE_API_SECRET}".encode()
+    ).hexdigest()
+    if not checksum or not hmac.compare_digest(checksum, expected_checksum):
+        logger.warning(f"[KITE POSTBACK] Rejected — invalid checksum for order_id={order_id}")
+        return {"status": "rejected", "reason": "invalid checksum"}
+
     logger.info(f"[KITE POSTBACK] {request}")
 
-    order_id  = request.get("order_id", "")
     status    = request.get("status", "")        # COMPLETE, REJECTED, CANCELLED
     symbol    = request.get("tradingsymbol", "")
     avg_price = request.get("average_price", 0.0)
@@ -200,8 +217,7 @@ async def kite_postback(request: dict):
             )
 
     elif status == "REJECTED":
-        import logging as _log
-        _log.getLogger(__name__).warning(
+        logger.warning(
             f"[KITE POSTBACK] Order REJECTED: {symbol} | reason: {request.get('status_message', '')}"
         )
 
