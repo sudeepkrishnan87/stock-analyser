@@ -18,6 +18,29 @@ FALLBACK_ANALYSIS = {
 }
 
 
+def _error_analysis(reason: str) -> dict:
+    """
+    Fallback for a real API/parse failure — distinct from FALLBACK_ANALYSIS,
+    which is only for the "no API key configured" case. Every underlying
+    analysis service (technical, candlestick, Elliott Wave, FII/DII) ran fine
+    in this path; only Claude's narrative failed, so the message says that
+    instead of falsely claiming missing data or a missing key.
+    """
+    return {
+        "signal": "HOLD",
+        "confidence": "LOW",
+        "price_target": None,
+        "stop_loss": None,
+        "time_horizon": "N/A",
+        "elliott_wave_position": "AI narrative unavailable this time — see message below",
+        "pattern_summary": "AI narrative unavailable this time — see message below",
+        "fii_dii_sentiment": "AI narrative unavailable this time — see message below",
+        "quarterly_outlook": "AI narrative unavailable this time — see message below",
+        "narrative": reason,
+        "key_risks": ["AI narrative generation failed this time — retry, or check backend logs"],
+    }
+
+
 def _format_patterns(patterns: List[Dict]) -> str:
     if not patterns:
         return "No significant patterns detected in recent candles."
@@ -131,11 +154,22 @@ Based on this comprehensive analysis, provide your trading recommendation. Retur
 
         with client.messages.stream(
             model="claude-opus-4-6",
-            max_tokens=2000,
+            # max_tokens is a ceiling on thinking + final text COMBINED, not just the
+            # visible response — with thinking={"adaptive"}, reasoning tokens count
+            # against this same budget. 2000 was too tight and produced truncated,
+            # unparseable JSON mid-string. 4096 gives real headroom; actual billing
+            # is based on tokens generated, not this ceiling, so this doesn't
+            # meaningfully raise cost on the common case — it just stops truncating.
+            max_tokens=4096,
             thinking={"type": "adaptive"},
             messages=[{"role": "user", "content": prompt}],
         ) as stream:
             final_message = stream.get_final_message()
+
+        if final_message.stop_reason == "max_tokens":
+            return _error_analysis(
+                "AI response was cut off at the token limit before it finished — try analyzing again."
+            )
 
         # Extract text block (skip thinking blocks)
         response_text = ""
@@ -161,7 +195,7 @@ Based on this comprehensive analysis, provide your trading recommendation. Retur
                 parsed[key] = FALLBACK_ANALYSIS[key]
         return parsed
 
+    except json.JSONDecodeError as e:
+        return _error_analysis(f"AI response could not be parsed as JSON: {e}")
     except Exception as e:
-        fallback = dict(FALLBACK_ANALYSIS)
-        fallback["narrative"] = f"AI analysis error: {str(e)[:200]}"
-        return fallback
+        return _error_analysis(f"AI analysis error: {str(e)[:200]}")
