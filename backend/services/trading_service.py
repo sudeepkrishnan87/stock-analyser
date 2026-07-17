@@ -26,7 +26,7 @@ import pytz
 
 from config import settings
 from brokers.base import BaseBroker
-from services import alert_service
+from services import alert_service, backup_service
 
 logger = logging.getLogger(__name__)
 IST = pytz.timezone("Asia/Kolkata")
@@ -120,6 +120,7 @@ class TradeState:
         self._load()
 
     def _load(self):
+        backup_service.restore_trades_file_if_missing(TRADES_FILE)
         if not os.path.exists(TRADES_FILE):
             return
         try:
@@ -144,6 +145,7 @@ class TradeState:
             }
             with open(TRADES_FILE, "w") as f:
                 json.dump(data, f, indent=2, default=str)
+            backup_service.backup_trades_file(TRADES_FILE)
         except Exception as e:
             logger.error(f"Could not save trade state: {e}")
 

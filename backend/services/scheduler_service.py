@@ -2,11 +2,13 @@
 Background scheduler: runs automated scans and trading jobs during market hours.
 
 Schedule (IST):
-  09:00 AM  — Pre-market scan (fetch data, run fundamentals overnight)
+  09:00 AM  — Pre-market scan: top 5 picks, alert + queued for approval (Signals tab)
   09:15 AM  — Market open: first intraday scan
-  Every 15m  — Intraday scan (alert-only) + position monitor (09:30 – 15:15)
+  Every 15m  — Intraday scan: top 3 STRONG BUY+breakout, alert + queued for approval;
+              position monitor runs first (09:30 – 15:15)
   03:15 PM  — Exit all intraday positions
   03:35 PM  — Daily P&L report email + WhatsApp
+  03:45 PM  — Swing scan: top 3 next-day setups, alert + queued for approval (~24h TTL)
   Weekdays only (Mon–Fri), no scan on NSE holidays.
 
 No job in this file ever calls trading_service.enter_trade() — new entries always
@@ -31,6 +33,14 @@ logger = logging.getLogger(__name__)
 IST = pytz.timezone("Asia/Kolkata")
 
 _scheduler: Optional[BackgroundScheduler] = None
+
+
+def _minutes_until(hour: int, minute: int) -> int:
+    """Minutes from now until today's given IST clock time (floor of 1 minute if already past)."""
+    now = datetime.now(IST)
+    target = now.replace(hour=hour, minute=minute, second=0, microsecond=0)
+    delta = (target - now).total_seconds() / 60
+    return max(1, int(delta))
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -79,7 +89,7 @@ def job_premarket_scan():
         logger.warning("[SCHEDULER] Pre-market: broker not authenticated, skipping.")
         return
 
-    from services import screener_service, alert_service
+    from services import screener_service, alert_service, signal_service
 
     try:
         results = screener_service.scan_watchlist(
@@ -91,6 +101,8 @@ def job_premarket_scan():
         if results:
             top = results[:5]
             lines = ["PRE-MARKET WATCHLIST — Top Picks Today", "=" * 40]
+            # Valid for approval through today's market close — these are same-day picks.
+            ttl = _minutes_until(15, 15)
             for i, r in enumerate(top, 1):
                 lines.append(
                     f"{i}. {r['symbol']} | Score: {r['signal_score']}/100 | "
@@ -101,6 +113,15 @@ def job_premarket_scan():
                     lines.append(
                         f"   Entry: ₹{ts['entry']} | SL: ₹{ts['stop_loss']} | "
                         f"Target: ₹{ts['target']} | R:R 1:{ts['rr_ratio']}"
+                    )
+                    signal_service.add_pending_signal(
+                        symbol=r["symbol"],
+                        signal=r["signal"],
+                        signal_score=r.get("signal_score", 0),
+                        trade_suggestion=ts,
+                        source="PREMARKET",
+                        breakout_signal=r.get("breakout_signal"),
+                        ttl_minutes=ttl,
                     )
             body = "\n".join(lines)
             alert_service.send_alert("Pre-Market Top Picks", body)
@@ -155,6 +176,7 @@ def job_intraday_scan():
                         signal=r["signal"],
                         signal_score=r.get("signal_score", 0),
                         trade_suggestion=r["trade_suggestion"],
+                        source="INTRADAY",
                         breakout_signal=r.get("breakout_signal"),
                     )
     except Exception as e:
@@ -211,7 +233,7 @@ def job_swing_scan():
     if not broker:
         return
 
-    from services import screener_service, alert_service
+    from services import screener_service, alert_service, signal_service
 
     try:
         results = screener_service.scan_watchlist(
@@ -235,6 +257,17 @@ def job_swing_scan():
                         f"SL: ₹{ts.get('stop_loss', 'N/A')} | "
                         f"Target: ₹{ts.get('target', 'N/A')} | "
                         f"R:R 1:{ts.get('rr_ratio', 'N/A')}"
+                    )
+                    # ~24h — meant for next trading day's entry, not today's. Approximate:
+                    # doesn't account for weekends, so a Friday swing pick reads as
+                    # "valid ~1 day" even though the next session is Monday.
+                    signal_service.add_pending_signal(
+                        symbol=r["symbol"],
+                        signal=r["signal"],
+                        signal_score=r.get("signal_score", 0),
+                        trade_suggestion=ts,
+                        source="SWING",
+                        ttl_minutes=24 * 60,
                     )
                 if fund.get("pe_ratio"):
                     lines.append(

@@ -45,6 +45,7 @@ Rate limiting (5/min auth, 30/min general) lives only in `nginx/conf.d/stockbot.
 
 ### 🟡 Accepted risk: `trades.json` has no integrity check
 Sole source of truth for open positions/P&L, plain JSON, no signature/checksum. A corrupted or manually-edited file silently becomes "reality" on next load (`trading_service.py` broad `except Exception` on load just starts empty). Low likelihood, but worth knowing: if you ever hand-edit this file to fix a stuck position, a typo won't be caught.
+- **Partially mitigated (2026-07-17)**: `services/backup_service.py` pushes `trades.json` to a private, versioned S3 bucket (`jarvis-tradebook-backup-233903268134`, `ap-south-1`) after every save, and restores it on startup if the local file is missing (e.g. after an EC2 instance replacement — see `docs/DEPLOYMENT.md`). This protects against *loss* (instance/volume destroyed) and gives rollback-to-any-version via S3 versioning, but does **not** add a checksum/signature check on load — a corrupted file still loads as-is; you'd have to notice and manually restore an older S3 version yourself.
 
 ### 🟡 Noted, not a vulnerability: NSE scraping impersonation
 `nse_service.py` spoofs a desktop Chrome User-Agent/Referer to get past NSE India's bot detection for FII/DII data — functional necessity for an undocumented public endpoint, not a security bug in this app, but fragile and ToS-adjacent. If NSE changes their bot detection, this breaks silently; treat FII/DII data as best-effort.

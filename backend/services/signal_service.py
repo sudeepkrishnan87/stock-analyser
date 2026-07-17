@@ -1,14 +1,15 @@
 """
 Pending trade signals awaiting human approval.
 
-The scheduler's intraday scan surfaces STRONG BUY + confirmed-breakout candidates
-here instead of entering them automatically (see docs/SECURITY.md — "no global
-paper-trading switch" finding). Nothing in this module talks to a broker;
-approve_signal() is the only bridge into trading_service.enter_trade(), and it
-only ever runs when a human calls it explicitly via POST /api/signals/{id}/approve.
+Every scan job (premarket, intraday, swing) that finds a BUY/STRONG BUY with a
+viable trade_suggestion queues it here instead of entering it automatically
+(see docs/SECURITY.md — "no global paper-trading switch" finding). Nothing in
+this module talks to a broker; approve_signal() is the only bridge into
+trading_service.enter_trade(), and it only ever runs when a human calls it
+explicitly via POST /api/signals/{id}/approve.
 
-In-memory only, by design: signals are intraday and expire in minutes, so there's
-nothing worth surviving a process restart (unlike trades.json).
+In-memory only, by design: even the longest-lived signals (swing, ~24h) don't
+need to survive a process restart the way trades.json does.
 """
 
 import logging
@@ -22,6 +23,8 @@ import pytz
 logger = logging.getLogger(__name__)
 IST = pytz.timezone("Asia/Kolkata")
 
+# Default TTL for intraday signals — matches the 15-min scan cadence, i.e. a
+# signal is expected to be superseded or acted on before the next tick.
 SIGNAL_TTL_MINUTES = 20
 
 
@@ -35,6 +38,8 @@ class PendingSignal:
     stop_loss: float
     target: float
     rr_ratio: float
+    trade_type: str            # INTRADAY | SWING — decides product (MIS/CNC) on approval
+    source: str                # PREMARKET | INTRADAY | SWING — which scan found it
     breakout_signal: Optional[str]
     created_at: str
     expires_at: str
@@ -50,7 +55,9 @@ def add_pending_signal(
     signal: str,
     signal_score: float,
     trade_suggestion: dict,
+    source: str = "INTRADAY",
     breakout_signal: Optional[str] = None,
+    ttl_minutes: Optional[int] = None,
 ) -> PendingSignal:
     """Queue a signal for approval, replacing any still-pending one for the same symbol."""
     for sid, s in list(_pending.items()):
@@ -58,6 +65,7 @@ def add_pending_signal(
             del _pending[sid]
 
     now = datetime.now(IST)
+    ttl = ttl_minutes if ttl_minutes is not None else SIGNAL_TTL_MINUTES
     sig = PendingSignal(
         id=uuid.uuid4().hex[:10],
         symbol=symbol,
@@ -67,12 +75,14 @@ def add_pending_signal(
         stop_loss=trade_suggestion["stop_loss"],
         target=trade_suggestion["target"],
         rr_ratio=trade_suggestion.get("rr_ratio", 0),
+        trade_type=trade_suggestion.get("trade_type", "INTRADAY"),
+        source=source,
         breakout_signal=breakout_signal,
         created_at=now.isoformat(),
-        expires_at=(now + timedelta(minutes=SIGNAL_TTL_MINUTES)).isoformat(),
+        expires_at=(now + timedelta(minutes=ttl)).isoformat(),
     )
     _pending[sig.id] = sig
-    logger.info(f"[SIGNALS] Queued {symbol} for approval ({signal}, score {signal_score})")
+    logger.info(f"[SIGNALS] Queued {symbol} for approval ({source}, {signal}, score {signal_score})")
     return sig
 
 
@@ -109,8 +119,8 @@ def approve_signal(signal_id: str) -> dict:
         entry_price=sig.entry,
         stop_loss=sig.stop_loss,
         target=sig.target,
-        trade_type="INTRADAY",
-        product="MIS",
+        trade_type=sig.trade_type,
+        product="MIS" if sig.trade_type == "INTRADAY" else "CNC",
     )
     sig.status = "APPROVED"
     sig.resolution = result

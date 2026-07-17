@@ -69,6 +69,8 @@ export interface PendingSignal {
   stop_loss: number;
   target: number;
   rr_ratio: number;
+  trade_type: string;
+  source: "PREMARKET" | "INTRADAY" | "SWING";
   breakout_signal?: string | null;
   created_at: string;
   expires_at: string;

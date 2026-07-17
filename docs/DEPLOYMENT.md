@@ -12,6 +12,7 @@ One-stop reference for everything between "I have a `.pem` file" and "the change
 | SSH key pair | `stockbot-mumbai` — private key at `~/Downloads/stockbot-mumbai.pem` |
 | App directory on server | `/opt/stockbot` (git clone, same repo as local) |
 | Secrets | AWS SSM Parameter Store, **eu-north-1 (Stockholm)** — see mismatch note below |
+| Trade book backup | S3 bucket `jarvis-tradebook-backup-233903268134`, **ap-south-1** (same region as EC2, deliberately — this is a new resource, not an old one to leave alone like the SSM mismatch). Versioned, private, 90-day noncurrent-version expiry. Written by `services/backup_service.py` after every trade-state save; restored on startup only if the local file is missing. Production-only (`ENVIRONMENT=production`) — local dev never touches it. |
 | Containers | `stockbot-api`, `stockbot-frontend`, `stockbot-nginx`, `stockbot-certbot` (`docker-compose.yml`) |
 | Deploy trigger | push to `main` → `.github/workflows/deploy.yml` → SSH → `git pull` → `docker compose build` → `up -d` |
 

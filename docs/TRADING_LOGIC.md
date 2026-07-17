@@ -67,13 +67,13 @@ State (`Position`, `ClosedTrade` dataclasses) lives in a module-level singleton,
 | Time | Job | What it does |
 |---|---|---|
 | 08:30 | `job_auto_login` | Scripted Zerodha web-login via stored password + live TOTP code (see `docs/SECURITY.md` §Zerodha auto-login) |
-| 09:00 | `job_premarket_scan` | Full watchlist + fundamentals, `min_score=60`, emails top 5 — **alert only, no auto-trade** |
-| 09:15–15:15, every 15 min | `job_intraday_scan` | 1) `monitor_positions()` first (SL/target/trailing checks on existing positions) 2) scans top 15 watchlist symbols on 15-min candles 3) **for the top 3 results, if `signal == STRONG BUY` AND there's a confirmed trendline breakout, it sends an alert only** (`scheduler_service.py:139-146`) — no order is ever placed automatically; entering the trade requires a separate, human-initiated call to the trading API |
+| 09:00 | `job_premarket_scan` | Full watchlist + fundamentals, `min_score=60`, top 5 emailed **and** queued to `signal_service` for approval in the Signals tab, TTL until today's 15:15 close |
+| 09:15–15:15, every 15 min | `job_intraday_scan` | 1) `monitor_positions()` first (SL/target/trailing checks on existing positions) 2) scans top 15 watchlist symbols on 15-min candles 3) **for the top 3 results, if `signal == STRONG BUY` AND there's a confirmed trendline breakout**, it alerts **and** queues to `signal_service` (`scheduler_service.py:144-166`), TTL 20 min — no order is ever placed automatically; entering the trade requires approving it in the Signals tab or a separate, human-initiated call to the trading API |
 | 15:15 | `job_exit_intraday` | Square off all MIS/INTRADAY positions before close |
 | 15:35 | `job_daily_report` | P&L summary via email/WhatsApp |
-| 15:45 | `job_swing_scan` | EOD scan, `min_score=65`, emails swing setups for next-day **manual** entry (not auto-traded) |
+| 15:45 | `job_swing_scan` | EOD scan, `min_score=65`, top 3 emailed **and** queued to `signal_service` for next-day entry, TTL ~24h |
 
-Only the 09:15–15:15 intraday job auto-trades. Pre-market and swing scans are alert-only by design — if you want to change that, it's a one-line addition of the same `can_enter_trade()` + `enter_trade()` block used in `job_intraday_scan`, but understand you're expanding the auto-trade window.
+**No job in this file ever calls `enter_trade()` directly.** Every candidate any scan finds — premarket, intraday, or swing — goes through the same human-approval gate in the Signals tab (`services/signal_service.py`, `routers/signals.py`); only `approve_signal()` bridges into `trading_service.enter_trade()`, and that only runs when you click Approve. The three scan types differ only in *how long* a signal stays valid before expiring unapproved (20 min / until close / ~24h) and which `trade_type` (INTRADAY→MIS vs SWING→CNC) the resulting order uses.
 
 ## 4. Order execution — `brokers/zerodha.py` / `brokers/fyers.py`
 
@@ -90,4 +90,4 @@ Access tokens for both brokers live only in `Settings._kite_access_token` / `_fy
 
 ## 6. Where the frontend actually reaches
 
-The React SPA (`frontend/src`) currently only renders the single-stock analysis view (chart + indicators + candlestick patterns + FII/DII + AI narrative) driven by `GET /api/stock/{symbol}`. The scanner and trading endpoints (`/api/scanner/*`, `/api/trading/*`) are called nowhere in the frontend — they exist in `api/client.ts` but have no page/component wired up. In practice, today, the *only* way scanning/trading happens is via the scheduler or direct API calls (curl/Postman) — there is no "Scanner" or "Trading" tab in the UI yet. If you're asked to add one, this doc plus `CLAUDE.md`'s repo map is the starting context.
+The React SPA (`frontend/src`) has two tabs: **Research** (`GET /api/stock/{symbol}` — chart + indicators + candlestick patterns + FII/DII + AI narrative) and **Signals** (`GET/POST /api/signals/*` — the pending-approval queue described in §3, with Approve/Reject actions and a live favicon/tab-title badge). The broader scanner and trading endpoints (`/api/scanner/*`, most of `/api/trading/*`) are still called nowhere in the frontend beyond that — they exist in `api/client.ts` but have no dedicated page. Full picture in `docs/ARCHITECTURE.md`.

@@ -72,6 +72,13 @@ class Settings:
     TWILIO_WHATSAPP_FROM: str = os.getenv("TWILIO_WHATSAPP_FROM", "whatsapp:+14155238886")
     TWILIO_WHATSAPP_TO: str = _aws_param("TWILIO_WHATSAPP_TO")
 
+    # ── Trade book backup (S3) ───────────────────────────────────────────────
+    # Bucket lives in ap-south-1 (same region as the EC2 instance) — deliberately
+    # NOT the eu-north-1 used for SSM params, see docs/DEPLOYMENT.md's region
+    # mismatch note. Empty string disables backup (used in local dev).
+    TRADE_BACKUP_BUCKET: str = os.getenv("TRADE_BACKUP_BUCKET", "jarvis-tradebook-backup-233903268134")
+    TRADE_BACKUP_REGION: str = os.getenv("TRADE_BACKUP_REGION", "ap-south-1")
+
     # ── Trading Capital & Risk Management ────────────────────────────────────
     TRADING_CAPITAL: float = float(os.getenv("TRADING_CAPITAL", "100000"))   # ₹1,00,000 default
     MAX_RISK_PER_TRADE_PCT: float = float(os.getenv("MAX_RISK_PER_TRADE_PCT", "2.0"))   # 2% per trade

@@ -10,10 +10,27 @@ interface Props {
 function timeLeft(expiresAt: string): string {
   const ms = new Date(expiresAt).getTime() - Date.now();
   if (ms <= 0) return "expired";
-  const mins = Math.floor(ms / 60000);
+  const totalMins = Math.floor(ms / 60000);
+  if (totalMins >= 60) {
+    const hours = Math.floor(totalMins / 60);
+    const mins = totalMins % 60;
+    return `${hours}h ${mins}m`;
+  }
   const secs = Math.floor((ms % 60000) / 1000);
-  return `${mins}m ${secs.toString().padStart(2, "0")}s`;
+  return `${totalMins}m ${secs.toString().padStart(2, "0")}s`;
 }
+
+const SOURCE_LABEL: Record<PendingSignal["source"], string> = {
+  PREMARKET: "Pre-Market",
+  INTRADAY: "Intraday",
+  SWING: "Swing (next day)",
+};
+
+const SOURCE_STYLE: Record<PendingSignal["source"], string> = {
+  PREMARKET: "bg-indigo-500/20 text-indigo-300 border-indigo-500/40",
+  INTRADAY: "bg-cyan-500/20 text-cyan-300 border-cyan-500/40",
+  SWING: "bg-purple-500/20 text-purple-300 border-purple-500/40",
+};
 
 export default function SignalsPanel({ signals, onResolved }: Props) {
   const [busyId, setBusyId] = useState<string | null>(null);
@@ -57,7 +74,8 @@ export default function SignalsPanel({ signals, onResolved }: Props) {
         </div>
         <p className="text-slate-400">No signals awaiting approval.</p>
         <p className="text-slate-600 text-xs mt-1">
-          Jarvis is watching the market — STRONG BUY breakouts will show up here the moment they fire.
+          Jarvis is watching the market — pre-market picks (9:00), intraday breakouts (every 15 min),
+          and next-day swing setups (3:45 PM) will show up here the moment they're found.
         </p>
       </div>
     );
@@ -72,14 +90,18 @@ export default function SignalsPanel({ signals, onResolved }: Props) {
         >
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div>
-              <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 flex-wrap">
                 <span className="text-xl font-bold tracking-wide">{s.symbol}</span>
                 <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-400 border border-amber-500/40">
                   {s.signal}
                 </span>
+                <span className={`text-xs font-medium px-2 py-0.5 rounded-full border ${SOURCE_STYLE[s.source]}`}>
+                  {SOURCE_LABEL[s.source]}
+                </span>
               </div>
               <p className="text-slate-500 text-xs mt-1">
-                Score {s.signal_score}/100{s.breakout_signal ? ` · ${s.breakout_signal}` : ""}
+                Score {s.signal_score}/100 · {s.trade_type}
+                {s.breakout_signal ? ` · ${s.breakout_signal}` : ""}
               </p>
             </div>
             <div className="text-right">
@@ -115,7 +137,9 @@ export default function SignalsPanel({ signals, onResolved }: Props) {
                 disabled={busyId === s.id}
                 className="flex-1 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-sm font-semibold py-2 rounded-lg transition-colors"
               >
-                {busyId === s.id ? "Placing order…" : "Approve & Enter Trade"}
+                {busyId === s.id
+                  ? "Placing order…"
+                  : `Approve & Enter (${s.trade_type === "INTRADAY" ? "MIS" : "CNC"})`}
               </button>
               <button
                 onClick={() => act(s.id, "reject")}
