@@ -6,7 +6,7 @@ One-stop reference for everything between "I have a `.pem` file" and "the change
 
 | | Value |
 |---|---|
-| EC2 instance | `i-0d7c9e38884df099e`, `t3.micro`, **ap-south-1 (Mumbai)** |
+| EC2 instance | `i-0d7c9e38884df099e`, `t3.micro`, **ap-south-1 (Mumbai)** — 908MB RAM total, chronically tight (often <100MB free at rest across 4 always-on containers, actively swapping) — see CI note below |
 | Public IP | `13.203.141.195` — this is an **Elastic IP** (`eipalloc-04154cdf3b9b810e9`), so it survives stop/start, but not termination |
 | Domain | `jarvis.mytechexp.com` → resolves to the Elastic IP above |
 | SSH key pair | `stockbot-mumbai` — private key at `~/Downloads/stockbot-mumbai.pem` |
@@ -127,6 +127,7 @@ ssh -i ~/Downloads/stockbot-mumbai.pem ubuntu@13.203.141.195 "cd /opt/stockbot &
 | Symptom | Likely cause | Fix |
 |---|---|---|
 | CI fails at "Deploy via SSH", `git pull`/build never seem to run | EC2 instance is stopped | Start it, then re-run the job or deploy manually (above) |
+| CI fails at "Deploy via SSH" even though the instance is confirmed running, step takes 90s+ | **t3.micro memory pressure** (908MB total, chronically <100MB free) pushes the build/startup into swap, making it slower than the health-check wait assumed — confirmed via `docker compose logs` showing the container actually starting well into the step's runtime, no OOM-kill in `dmesg`/`journalctl` (2026-07-23). Fixed in `deploy.yml` by polling the health check (18×5s) instead of one fixed `sleep 15` + single curl attempt. If it recurs even with polling, the instance itself may need to move to `t3.small` (2GB RAM, ~2x cost) — a deliberate call, not a reflex fix. |
 | `ParameterNotFound` checking SSM from `ap-south-1` | Wrong region — secrets live in `eu-north-1` | Always pass `--region eu-north-1` for `/stockbot/*` params |
 | Frontend shows an auth/API-key error right after a key rotation | Browser `localStorage` still has the old key | Log out, log back in with the new key |
 | `ModuleNotFoundError: No module named 'ta'` running `uvicorn` **locally** on your Mac | Wrong/base conda env active, unrelated to the Docker image | `pip install ta` in whichever env you intend to run locally, or just test via Docker instead |

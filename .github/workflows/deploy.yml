@@ -34,6 +34,23 @@ jobs:
             sudo docker compose up -d
 
             echo "→ Waiting for API..."
-            sleep 15
-            sudo docker compose exec -T api curl -sf http://localhost:8000/api/health > /dev/null
+            # t3.micro is memory-tight (908MB total, often <100MB free at rest —
+            # see docs/DEPLOYMENT.md) and a build can push it into swap, making
+            # startup slower than the old fixed 15s wait assumed. Poll instead
+            # of a one-shot check: exits the moment it's healthy, gives up to
+            # 90s before actually failing.
+            healthy=false
+            for i in $(seq 1 18); do
+              sleep 5
+              if sudo docker compose exec -T api curl -sf http://localhost:8000/api/health > /dev/null 2>&1; then
+                healthy=true
+                break
+              fi
+              echo "  still waiting... (${i}/18)"
+            done
+            if [ "$healthy" != "true" ]; then
+              echo "❌ API did not become healthy within 90s"
+              sudo docker compose logs --tail=50 api
+              exit 1
+            fi
             echo "✅ Deploy complete at $(date)"
