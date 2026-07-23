@@ -29,6 +29,11 @@ class BaseBroker(ABC):
         ...
 
     @abstractmethod
+    def get_available_funds(self) -> float:
+        """Returns available cash/margin for equity trading, in INR."""
+        ...
+
+    @abstractmethod
     def place_order(
         self,
         symbol: str,

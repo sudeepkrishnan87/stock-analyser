@@ -147,7 +147,7 @@ flowchart TD
     Gate -- fails --> RejGate["REJECTED — reason shown in the card"]
     Gate -- passes --> RR{"R:R >= 1.5?"}
     RR -- no --> RejRR["REJECTED — R:R too low"]
-    RR -- yes --> Broker["broker.place_order()\nMARKET order — Zerodha or Fyers,\nwhichever is ACTIVE_BROKER"]
+    RR -- yes --> Broker["broker.place_order()\nmarketable LIMIT order (0.25% beyond LTP)\nZerodha or Fyers, whichever is ACTIVE_BROKER"]
     Broker --> Position["Position written to trades.json\nalert_service.alert_trade_executed()"]
     Position -.->|"next scheduler tick"| Monitor
 ```

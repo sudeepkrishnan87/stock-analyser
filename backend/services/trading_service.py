@@ -212,12 +212,16 @@ def _get_broker() -> BaseBroker:
     return ZerodhaBroker()
 
 
-def calculate_position_size(entry: float, stop_loss: float) -> int:
+def calculate_position_size(entry: float, stop_loss: float, broker: Optional[BaseBroker] = None) -> int:
     """
     Risk-based position sizing.
     Risk amount = 2% of capital.
     Shares = risk_amount / (entry - stop_loss)
-    Capped at max_exposure_pct of capital.
+    Capped at max_exposure_pct of capital, and — if a broker is passed —
+    additionally capped at real available funds in the account, so sizing
+    never assumes cash that isn't actually there. Failure to fetch funds
+    (transient API issue) falls back to the configured-capital-only cap
+    rather than blocking the trade.
     """
     risk_amount = _state.capital * (settings.MAX_RISK_PER_TRADE_PCT / 100)
     risk_per_share = abs(entry - stop_loss)
@@ -225,12 +229,33 @@ def calculate_position_size(entry: float, stop_loss: float) -> int:
         return 0
     shares = int(risk_amount / risk_per_share)
 
-    # Cap so total deployment stays within limit
+    # Cap so total deployment stays within the configured limit
     max_deployable = _state.capital * (settings.MAX_PORTFOLIO_EXPOSURE_PCT / 100) - _state.deployed_capital
     if max_deployable <= 0:
         return 0
     shares = min(shares, int(max_deployable / entry))
+
+    if broker is not None:
+        try:
+            available_funds = broker.get_available_funds()
+            shares = min(shares, int(available_funds / entry))
+        except Exception as e:
+            logger.warning(f"Could not fetch available funds — sizing off configured capital only: {e}")
+
     return max(0, shares)
+
+
+def _round_to_tick(price: float, tick: float = 0.05) -> float:
+    """NSE equity tick size is 0.05 — snap to the nearest valid tick or the broker rejects the order."""
+    return round(round(price / tick) * tick, 2)
+
+
+# Marketable-limit buffer beyond live LTP — Zerodha's API rejects plain MARKET
+# orders ("market protection" restriction, see docs/TRADING_LOGIC.md §4), so
+# every order is placed as a LIMIT order priced just past LTP instead. Wide
+# enough to fill immediately in normal liquidity, tight enough to bound
+# worst-case slippage.
+LIMIT_ORDER_BUFFER_PCT = 0.25
 
 
 def can_enter_trade() -> Tuple[bool, str]:
@@ -272,9 +297,23 @@ def enter_trade(
     if rr < 1.5:
         return {"status": "REJECTED", "reason": f"R:R ratio {rr:.1f} below minimum 1.5"}
 
-    quantity = calculate_position_size(entry_price, stop_loss)
+    broker = _get_broker()
+    quantity = calculate_position_size(entry_price, stop_loss, broker=broker)
     if quantity == 0:
-        return {"status": "REJECTED", "reason": "Position size is 0. Check capital or exposure."}
+        return {"status": "REJECTED", "reason": "Position size is 0. Check capital, exposure, or available funds."}
+
+    tx_type = "BUY" if direction == "LONG" else "SELL"
+
+    # Price the marketable LIMIT order off live LTP, not the signal's (possibly
+    # stale, up to ~24h old for swing) entry_price — falls back to entry_price
+    # only if the live quote fetch itself fails.
+    try:
+        ltp = broker.fetch_ltp(symbol)
+    except Exception as e:
+        logger.warning(f"Could not fetch LTP for {symbol}, using signal entry price instead: {e}")
+        ltp = entry_price
+    buffer_mult = 1 + LIMIT_ORDER_BUFFER_PCT / 100 if tx_type == "BUY" else 1 - LIMIT_ORDER_BUFFER_PCT / 100
+    limit_price = _round_to_tick(ltp * buffer_mult)
 
     if dry_run:
         return {
@@ -283,6 +322,7 @@ def enter_trade(
             "direction": direction,
             "quantity": quantity,
             "entry_price": entry_price,
+            "limit_price": limit_price,
             "stop_loss": stop_loss,
             "target": target,
             "trade_type": trade_type,
@@ -291,14 +331,13 @@ def enter_trade(
             "rr_ratio": round(rr, 2),
         }
 
-    broker = _get_broker()
-    tx_type = "BUY" if direction == "LONG" else "SELL"
     try:
         order = broker.place_order(
             symbol=symbol,
             transaction_type=tx_type,
             quantity=quantity,
-            order_type="MARKET",
+            order_type="LIMIT",
+            price=limit_price,
             product=product,
         )
     except Exception as e:
@@ -311,7 +350,7 @@ def enter_trade(
     position = Position(
         symbol=symbol,
         quantity=quantity,
-        entry_price=entry_price,
+        entry_price=limit_price,
         stop_loss=stop_loss,
         target=target,
         trade_type=trade_type,
@@ -323,15 +362,15 @@ def enter_trade(
     _state.positions[symbol] = position
     _state.save()
 
-    alert_service.alert_trade_executed(symbol, tx_type, quantity, entry_price, position.order_id)
+    alert_service.alert_trade_executed(symbol, tx_type, quantity, limit_price, position.order_id)
 
-    logger.info(f"Entered {direction} {symbol}: qty={quantity}, entry={entry_price}, sl={stop_loss}, target={target}")
+    logger.info(f"Entered {direction} {symbol}: qty={quantity}, limit={limit_price}, sl={stop_loss}, target={target}")
     return {
         "status": "EXECUTED",
         "symbol": symbol,
         "direction": direction,
         "quantity": quantity,
-        "entry_price": entry_price,
+        "entry_price": limit_price,
         "stop_loss": stop_loss,
         "target": target,
         "order_id": position.order_id,
@@ -350,12 +389,19 @@ def exit_trade(symbol: str, exit_price: float, reason: str = "MANUAL") -> Option
     broker = _get_broker()
 
     tx_type = "SELL" if pos.direction == "LONG" else "BUY"
+    # Same Zerodha "market protection" restriction as enter_trade() — a bare
+    # MARKET order is rejected by the API. exit_price is already a fresh LTP
+    # from the caller (monitor_positions / exit_all_intraday), so price the
+    # marketable LIMIT directly off it rather than re-fetching.
+    buffer_mult = 1 + LIMIT_ORDER_BUFFER_PCT / 100 if tx_type == "BUY" else 1 - LIMIT_ORDER_BUFFER_PCT / 100
+    exit_limit_price = _round_to_tick(exit_price * buffer_mult)
     try:
         order = broker.place_order(
             symbol=symbol,
             transaction_type=tx_type,
             quantity=pos.quantity,
-            order_type="MARKET",
+            order_type="LIMIT",
+            price=exit_limit_price,
             product="CNC" if pos.trade_type == "SWING" else "MIS",
         )
     except Exception as e:

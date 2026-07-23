@@ -46,13 +46,16 @@ Four env-driven gates, all defined in `config.py:76-81`:
 | `DAILY_LOSS_LIMIT_PCT` | 3% | `can_enter_trade()` (`trading_service.py:234`) |
 | `MAX_OPEN_POSITIONS` | 5 | `can_enter_trade()` |
 
-**Position sizing** (`trading_service.py:213-231`):
+**Position sizing** (`trading_service.py:calculate_position_size`):
 ```
 risk_amount   = capital * (MAX_RISK_PER_TRADE_PCT / 100)
 shares        = risk_amount / abs(entry - stop_loss)
 max_deployable = capital * (MAX_PORTFOLIO_EXPOSURE_PCT / 100) - already_deployed_capital
 shares        = min(shares, max_deployable / entry)
+shares        = min(shares, broker.get_available_funds() / entry)   # 2026-07-23
 ```
+
+**Real available funds are a hard cap, not a replacement for `TRADING_CAPITAL`** (added 2026-07-23, `brokers/base.py`'s `get_available_funds()` — Zerodha via `kite.margins()["equity"]["net"]`, Fyers via `fyers.funds()`). Sizing is still driven by the configured `TRADING_CAPITAL`/risk-%/exposure ceilings above; the live broker balance only ever *shrinks* the result, never grows it past the configured ceiling — so having more cash sitting in the account doesn't silently increase risk per trade, but having *less* than `TRADING_CAPITAL` assumes will correctly reduce (or zero out) position size instead of getting a broker rejection for insufficient funds. If the funds API call itself fails (network blip, margins endpoint down), sizing silently falls back to the configured-capital-only calculation — this fails open to the pre-2026-07-23 behavior, not closed.
 
 **Important limitation**: all four gates are checked **only at trade-entry time** (`can_enter_trade()`, called from `enter_trade()`). They are not re-evaluated continuously. `monitor_positions()` (`trading_service.py:402`, called every 15 min by the scheduler) checks each open position's own SL/target/trailing stop, but does **not** re-check `DAILY_LOSS_LIMIT_PCT` as a circuit breaker mid-day — if unrealized losses on open positions deepen between scheduler ticks, nothing forces an exit until either that position's own SL is hit or someone tries to open a *new* trade (which is when the daily-loss gate would then block further entries).
 
@@ -77,7 +80,9 @@ State (`Position`, `ClosedTrade` dataclasses) lives in a module-level singleton,
 
 ## 4. Order execution — `brokers/zerodha.py` / `brokers/fyers.py`
 
-`trading_service.enter_trade()` → `_get_broker()` picks Zerodha or Fyers per `ACTIVE_BROKER` → `broker.place_order(order_type="MARKET")`. Both brokers place **live market orders directly**; there is no paper/simulation broker class. `dry_run=True` is a parameter on `enter_trade()` (surfaced via `POST /api/trading/dry-run`) that returns the computed sizing without calling the broker — it is not a global switch, so every other call path (including the scheduler's auto-entry) is live by default.
+`trading_service.enter_trade()` → `_get_broker()` picks Zerodha or Fyers per `ACTIVE_BROKER` → `broker.place_order(order_type="LIMIT", price=limit_price)`. Both brokers place **live orders directly**; there is no paper/simulation broker class. `dry_run=True` is a parameter on `enter_trade()` (surfaced via `POST /api/trading/dry-run`) that returns the computed sizing without calling the broker — it is not a global switch, so every other call path is live by default.
+
+**Not a true market order** (fixed 2026-07-23): Zerodha's API rejects plain `MARKET` orders outright — *"Market orders without market protection are not allowed via API. Please set market protection or use a Limit order."* This was silently failing **every single approval** from 2026-07-22 until the fix (order placed, immediately rejected, `EXECUTED` never returned — `approve_signal()` correctly reported the `ERROR` status, but it's easy to miss in the UI). The fix: `enter_trade()` now fetches live LTP via `broker.fetch_ltp()` at approval time and places a marketable `LIMIT` order priced `LIMIT_ORDER_BUFFER_PCT` (0.25%, `trading_service.py`) beyond it — above LTP for BUY, below for SELL — snapped to the NSE 0.05 tick size via `_round_to_tick()`. This fills essentially immediately in normal liquidity while satisfying the API's requirement. The position's stored `entry_price` is this computed limit price, not the original signal's (possibly stale — up to ~24h old for swing) `entry_price`; if the LTP fetch itself fails, it falls back to the signal's entry price.
 
 Order lifecycle sync happens via broker webhooks: Zerodha → `POST /api/auth/postback`, Fyers → `POST /api/auth/fyers/postback`. Both are public (unauthenticated by API key, since brokers can't send it) — the Zerodha handler now verifies Zerodha's HMAC checksum before trusting the payload (fixed — see `docs/SECURITY.md`); the Fyers handler is still a stub that only logs (`routers/auth.py:326-337`, literally commented "Future: parse and sync"). Neither postback reconciles `trading_service`'s in-memory state beyond a P&L log line — the source of truth for "am I in a position" remains `trades.json`, updated only by the code paths in `trading_service.py` itself, not by broker callbacks.
 

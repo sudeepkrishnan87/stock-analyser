@@ -110,6 +110,17 @@ class ZerodhaBroker(BaseBroker):
         quote = kite.ltp([f"{exchange}:{symbol}"])
         return float(quote[f"{exchange}:{symbol}"]["last_price"])
 
+    def get_available_funds(self) -> float:
+        kite = self._client()
+        equity = kite.margins().get("equity", {})
+        # "net" = cash + collateral - utilised — the actual tradable margin
+        # right now. Fall back to live_balance if a given account's response
+        # shape omits "net".
+        net = equity.get("net")
+        if net is not None:
+            return float(net)
+        return float(equity.get("available", {}).get("live_balance", 0))
+
     def place_order(
         self,
         symbol: str,

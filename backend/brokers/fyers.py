@@ -94,6 +94,16 @@ class FyersBroker(BaseBroker):
             raise ValueError(f"Fyers LTP error: {resp}")
         return float(resp["d"][0]["v"]["lp"])
 
+    def get_available_funds(self) -> float:
+        fyers = self._client()
+        resp = fyers.funds()
+        if resp.get("s") != "ok":
+            raise ValueError(f"Fyers funds error: {resp}")
+        for item in resp.get("fund_limit", []):
+            if item.get("title") == "Available Balance":
+                return float(item.get("equityAmount", 0))
+        raise ValueError("Fyers funds response missing 'Available Balance' entry")
+
     def place_order(
         self,
         symbol: str,
