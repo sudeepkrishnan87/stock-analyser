@@ -68,6 +68,11 @@ def open_positions():
                 "trailing_activated": p.trailing_activated,
                 "broker": p.broker,
                 "order_id": p.order_id,
+                "signal_score": p.signal_score,
+                "source": p.source,
+                "reason": p.reason,
+                "risk_amount": p.risk_amount,
+                "capital_at_entry": p.capital_at_entry,
             }
             for sym, p in state.positions.items()
         ],

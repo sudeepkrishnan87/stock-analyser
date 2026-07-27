@@ -113,6 +113,11 @@ def approve_signal(signal_id: str) -> dict:
     if sig.status != "PENDING":
         return {"status": "ALREADY_RESOLVED", "reason": f"Signal already {sig.status.lower()}."}
 
+    # Human-readable "why" for the trade book — prefer the specific breakout
+    # description if there is one, otherwise summarize the score. Note: the
+    # composite score's ceiling is ~130, not 100 (docs/TRADING_LOGIC.md §1).
+    reason = sig.breakout_signal or f"{sig.signal} signal, score {sig.signal_score}/130"
+
     result = trading_service.enter_trade(
         symbol=sig.symbol,
         direction="LONG",
@@ -121,6 +126,9 @@ def approve_signal(signal_id: str) -> dict:
         target=sig.target,
         trade_type=sig.trade_type,
         product="MIS" if sig.trade_type == "INTRADAY" else "CNC",
+        signal_score=sig.signal_score,
+        source=sig.source,
+        reason=reason,
     )
     sig.status = "APPROVED"
     sig.resolution = result

@@ -1,5 +1,5 @@
 import axios, { type InternalAxiosRequestConfig } from "axios";
-import type { StockAnalysisResponse, PendingSignal } from "../types";
+import type { StockAnalysisResponse, PendingSignal, PortfolioSummary, OpenPosition, ClosedTrade } from "../types";
 
 // ── API key must match API_SECRET_KEY in backend .env ─────────────────────
 // Store in localStorage so you only paste it once
@@ -79,18 +79,18 @@ export async function triggerScan(type: "swing" | "intraday" | "premarket") {
 }
 
 // ── Trading ───────────────────────────────────────────────────────────────
-export async function getPortfolio() {
+export async function getPortfolio(): Promise<PortfolioSummary> {
   const { data } = await api.get("/trading/portfolio");
   return data;
 }
 
-export async function getOpenPositions() {
+export async function getOpenPositions(): Promise<{ count: number; positions: OpenPosition[] }> {
   const { data } = await api.get("/trading/positions");
   return data;
 }
 
-export async function getTradeHistory() {
-  const { data } = await api.get("/trading/history");
+export async function getTradeHistory(limit = 100): Promise<{ trades: ClosedTrade[] }> {
+  const { data } = await api.get(`/trading/history?limit=${limit}`);
   return data;
 }
 

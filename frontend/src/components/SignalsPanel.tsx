@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { PendingSignal } from "../types";
 import { approveSignal, rejectSignal } from "../api/client";
+import { SOURCE_LABEL, SOURCE_STYLE } from "../utils/tradeDisplay";
 
 interface Props {
   signals: PendingSignal[];
@@ -19,18 +20,6 @@ function timeLeft(expiresAt: string): string {
   const secs = Math.floor((ms % 60000) / 1000);
   return `${totalMins}m ${secs.toString().padStart(2, "0")}s`;
 }
-
-const SOURCE_LABEL: Record<PendingSignal["source"], string> = {
-  PREMARKET: "Pre-Market",
-  INTRADAY: "Intraday",
-  SWING: "Swing (next day)",
-};
-
-const SOURCE_STYLE: Record<PendingSignal["source"], string> = {
-  PREMARKET: "bg-indigo-500/20 text-indigo-300 border-indigo-500/40",
-  INTRADAY: "bg-cyan-500/20 text-cyan-300 border-cyan-500/40",
-  SWING: "bg-purple-500/20 text-purple-300 border-purple-500/40",
-};
 
 export default function SignalsPanel({ signals, onResolved }: Props) {
   const [busyId, setBusyId] = useState<string | null>(null);

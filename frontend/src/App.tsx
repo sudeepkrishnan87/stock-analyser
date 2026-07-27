@@ -12,6 +12,7 @@ import TechnicalIndicatorsPanel from "./components/TechnicalIndicatorsPanel";
 import CandlestickPatterns from "./components/CandlestickPatterns";
 import QuarterlyCard from "./components/QuarterlyCard";
 import SignalsPanel from "./components/SignalsPanel";
+import TradeBook from "./components/TradeBook";
 import { useFaviconBadge } from "./hooks/useFaviconBadge";
 
 const BASE_TITLE = "AI Stock Analyser — Indian Markets";
@@ -33,7 +34,7 @@ export default function App() {
   const [loadingStep, setLoadingStep] = useState("");
 
   // ── Tabs + pending signal approvals ─────────────────────────────────────────
-  const [activeTab, setActiveTab] = useState<"research" | "signals">("research");
+  const [activeTab, setActiveTab] = useState<"research" | "signals" | "tradebook">("research");
   const [pendingSignals, setPendingSignals] = useState<PendingSignal[]>([]);
 
   const refreshPendingSignals = useCallback(() => {
@@ -181,6 +182,12 @@ export default function App() {
             </p>
           </div>
           <SignalsPanel signals={pendingSignals} onResolved={refreshPendingSignals} />
+        </main>
+      )}
+
+      {activeTab === "tradebook" && (
+        <main className="max-w-7xl mx-auto px-4 py-6">
+          <TradeBook />
         </main>
       )}
 

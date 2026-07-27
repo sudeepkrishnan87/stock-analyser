@@ -35,6 +35,19 @@ IST = pytz.timezone("Asia/Kolkata")
 _scheduler: Optional[BackgroundScheduler] = None
 
 
+def _breakout_summary(breakout: Optional[dict]) -> Optional[str]:
+    """
+    trendline_service.detect_breakout_breakdown() returns a dict, not a string
+    — signal_service.PendingSignal.breakout_signal is typed/stored as a plain
+    string for display, so extract the pre-built one-liner here rather than
+    pass the raw dict through (which rendered as "[object Object]" in the
+    frontend before this fix).
+    """
+    if not breakout:
+        return None
+    return breakout.get("message") or f"{breakout.get('signal_type', 'Breakout')} ({breakout.get('direction', '')})"
+
+
 def _minutes_until(hour: int, minute: int) -> int:
     """Minutes from now until today's given IST clock time (floor of 1 minute if already past)."""
     now = datetime.now(IST)
@@ -120,7 +133,7 @@ def job_premarket_scan():
                         signal_score=r.get("signal_score", 0),
                         trade_suggestion=ts,
                         source="PREMARKET",
-                        breakout_signal=r.get("breakout_signal"),
+                        breakout_signal=_breakout_summary(r.get("breakout_signal")),
                         ttl_minutes=ttl,
                     )
             body = "\n".join(lines)
@@ -177,7 +190,7 @@ def job_intraday_scan():
                         signal_score=r.get("signal_score", 0),
                         trade_suggestion=r["trade_suggestion"],
                         source="INTRADAY",
-                        breakout_signal=r.get("breakout_signal"),
+                        breakout_signal=_breakout_summary(r.get("breakout_signal")),
                     )
     except Exception as e:
         logger.error(f"[SCHEDULER] Intraday scan error: {e}")

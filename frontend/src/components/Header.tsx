@@ -1,4 +1,4 @@
-type Tab = "research" | "signals";
+type Tab = "research" | "signals" | "tradebook";
 
 interface Props {
   isAuthenticated: boolean;
@@ -58,6 +58,20 @@ export default function Header({
                   {pendingSignalCount > 9 ? "9+" : pendingSignalCount}
                 </span>
               )}
+            </button>
+            <button
+              onClick={() => onTabChange("tradebook")}
+              className={`flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-md transition-colors ${
+                activeTab === "tradebook"
+                  ? "bg-slate-700 text-slate-100"
+                  : "text-slate-400 hover:text-slate-200"
+              }`}
+            >
+              <svg xmlns="http://www.w3.org/2000/svg" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20" />
+                <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z" />
+              </svg>
+              Trade Book
             </button>
           </nav>
         </div>

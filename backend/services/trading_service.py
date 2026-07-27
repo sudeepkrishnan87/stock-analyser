@@ -54,6 +54,14 @@ class Position:
     broker: str
     trailing_sl: float = 0.0
     trailing_activated: bool = False
+    # Reasoning captured at entry — why this trade was taken, not just its
+    # mechanics. Defaults keep old trades.json entries (before this field
+    # existed) loadable without a migration.
+    signal_score: float = 0.0
+    source: str = "MANUAL"    # PREMARKET | INTRADAY | SWING | MANUAL
+    reason: str = ""          # breakout description or score-based summary
+    risk_amount: float = 0.0  # ₹ actually at risk (quantity * |entry - stop_loss|)
+    capital_at_entry: float = 0.0  # _state.capital when sized, so the 2% risk math is auditable later
 
     def current_pnl(self, ltp: float) -> float:
         if self.direction == "LONG":
@@ -105,6 +113,13 @@ class ClosedTrade:
     exit_reason: str
     order_id: str
     broker: str
+    # Same reasoning fields as Position — carried through on close so closed
+    # trades stay analyzable (which scores/sources actually performed).
+    signal_score: float = 0.0
+    source: str = "MANUAL"
+    reason: str = ""
+    risk_amount: float = 0.0
+    capital_at_entry: float = 0.0
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -277,15 +292,21 @@ def enter_trade(
     trade_type: str,         # "SWING" | "INTRADAY"
     product: str = "CNC",   # CNC for swing, MIS for intraday
     dry_run: bool = False,
+    signal_score: float = 0.0,
+    source: str = "MANUAL",
+    reason: str = "",
 ) -> Optional[Dict]:
     """
     Enter a trade with full risk management.
     dry_run=True simulates the order without placing it.
+    signal_score/source/reason are purely for the trade book's record of *why*
+    this trade was taken — approve_signal() passes the originating signal's
+    values; callers with no signal context (manual entry) leave the defaults.
     """
-    ok, reason = can_enter_trade()
+    ok, block_reason = can_enter_trade()
     if not ok:
-        logger.warning(f"Cannot enter trade for {symbol}: {reason}")
-        return {"status": "REJECTED", "reason": reason}
+        logger.warning(f"Cannot enter trade for {symbol}: {block_reason}")
+        return {"status": "REJECTED", "reason": block_reason}
 
     if symbol in _state.positions:
         return {"status": "REJECTED", "reason": f"Already in position for {symbol}"}
@@ -358,6 +379,11 @@ def enter_trade(
         entry_time=datetime.now(IST).isoformat(),
         order_id=order.get("order_id", ""),
         broker=order.get("broker", ""),
+        signal_score=signal_score,
+        source=source,
+        reason=reason,
+        risk_amount=round(quantity * risk, 2),
+        capital_at_entry=round(_state.capital, 2),
     )
     _state.positions[symbol] = position
     _state.save()
@@ -425,6 +451,11 @@ def exit_trade(symbol: str, exit_price: float, reason: str = "MANUAL") -> Option
         exit_reason=reason,
         order_id=order.get("order_id", "") if order else "",
         broker=pos.broker,
+        signal_score=pos.signal_score,
+        source=pos.source,
+        reason=pos.reason,
+        risk_amount=pos.risk_amount,
+        capital_at_entry=pos.capital_at_entry,
     )
     _state.closed_trades.append(closed)
     _state.realized_pnl += pnl

@@ -77,6 +77,68 @@ export interface PendingSignal {
   status: "PENDING" | "APPROVED" | "REJECTED" | "EXPIRED";
 }
 
+// Shared "why was this trade taken" fields — present on both open positions
+// and closed trades, sourced from the signal that was approved (or "MANUAL"
+// defaults for trades entered outside the Signals tab).
+export interface TradeReasoning {
+  signal_score: number;
+  source: "PREMARKET" | "INTRADAY" | "SWING" | "MANUAL";
+  reason: string;
+  risk_amount: number;
+  capital_at_entry: number;
+}
+
+export interface OpenPosition extends TradeReasoning {
+  symbol: string;
+  direction: "LONG" | "SHORT";
+  quantity: number;
+  entry_price: number;
+  stop_loss: number;
+  target: number;
+  trade_type: "SWING" | "INTRADAY";
+  entry_time: string;
+  trailing_sl: number;
+  trailing_activated: boolean;
+  broker: string;
+  order_id: string;
+}
+
+export interface ClosedTrade extends TradeReasoning {
+  symbol: string;
+  quantity: number;
+  entry_price: number;
+  exit_price: number;
+  direction: "LONG" | "SHORT";
+  trade_type: "SWING" | "INTRADAY";
+  entry_time: string;
+  exit_time: string;
+  pnl: number;
+  pnl_pct: number;
+  exit_reason: string;
+  order_id: string;
+  broker: string;
+}
+
+export interface PortfolioSummary {
+  capital: number;
+  deployed_capital: number;
+  deployment_pct: number;
+  open_positions: number;
+  positions: OpenPosition[];
+  realized_pnl: number;
+  daily_pnl: number;
+  daily_pnl_pct: number;
+  mtd_pnl: number;
+  mtd_pnl_pct: number;
+  qtd_pnl: number;
+  qtd_pnl_pct: number;
+  total_trades: number;
+  win_rate: number;
+  can_trade: boolean;
+  trade_block_reason: string | null;
+  timestamp: string;
+}
+
 export interface AIAnalysis {
   signal: "BUY" | "SELL" | "HOLD";
   confidence: "HIGH" | "MEDIUM" | "LOW";
