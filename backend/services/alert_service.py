@@ -208,6 +208,24 @@ def alert_target_hit(symbol: str, entry_price: float, target_price: float, gain_
     return send_alert(f"🎯 TARGET: {symbol} (+{gain_pct:.2f}%)", body)
 
 
+def alert_partial_target_hit(
+    symbol: str, entry_price: float, exit_price: float, gain_pct: float,
+    qty_closed: int, qty_remaining: int, new_stop_loss: float,
+) -> Dict:
+    body = (
+        f"🎯 TARGET HIT — {symbol} (partial)\n"
+        f"{'─' * 40}\n"
+        f"Entry       : ₹{entry_price:.2f}\n"
+        f"Exit        : ₹{exit_price:.2f}\n"
+        f"Gain        : +{gain_pct:.2f}%\n"
+        f"Booked      : {qty_closed} shares\n"
+        f"Runner      : {qty_remaining} shares still open\n"
+        f"New SL      : ₹{new_stop_loss:.2f} (moved to protect the runner)\n"
+        f"\nHalf the profit is locked in. Letting the rest run."
+    )
+    return send_alert(f"🎯 PARTIAL TARGET: {symbol} (+{gain_pct:.2f}%, {qty_remaining} left)", body)
+
+
 def alert_daily_report(report: Dict) -> Dict:
     pnl = report.get("daily_pnl", 0)
     emoji = "📈" if pnl >= 0 else "📉"

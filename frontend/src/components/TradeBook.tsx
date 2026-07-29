@@ -147,6 +147,14 @@ export default function TradeBook() {
                     <td className="px-3 py-2 font-semibold">
                       {p.symbol}
                       <span className="ml-1.5 text-xs text-slate-500">{p.direction}</span>
+                      {p.partial_exit_done && (
+                        <span
+                          className="ml-1.5 text-[10px] px-1.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/40"
+                          title="50% booked at target — remainder running with SL at breakeven"
+                        >
+                          Partial booked
+                        </span>
+                      )}
                     </td>
                     <td className="px-3 py-2">
                       <span className={`text-xs px-2 py-0.5 rounded-full border ${SOURCE_STYLE[p.source]}`}>

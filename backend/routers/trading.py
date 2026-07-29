@@ -73,6 +73,7 @@ def open_positions():
                 "reason": p.reason,
                 "risk_amount": p.risk_amount,
                 "capital_at_entry": p.capital_at_entry,
+                "partial_exit_done": p.partial_exit_done,
             }
             for sym, p in state.positions.items()
         ],

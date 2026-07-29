@@ -62,6 +62,7 @@ class Position:
     reason: str = ""          # breakout description or score-based summary
     risk_amount: float = 0.0  # ₹ actually at risk (quantity * |entry - stop_loss|)
     capital_at_entry: float = 0.0  # _state.capital when sized, so the 2% risk math is auditable later
+    partial_exit_done: bool = False  # True once the 50% target-hit profit booking has fired
 
     def current_pnl(self, ltp: float) -> float:
         if self.direction == "LONG":
@@ -76,13 +77,17 @@ class Position:
         return (self.entry_price - ltp) / self.entry_price * 100
 
     def should_exit(self, ltp: float) -> Tuple[bool, str]:
-        """Returns (should_exit, reason)."""
-        pnl_pct = self.current_pnl_pct(ltp)
-
+        """
+        Returns (should_exit, reason). Once the target has already triggered
+        a partial (50%) exit, the original target no longer closes the
+        remainder — the runner is governed purely by stop_loss (moved to
+        breakeven-or-better at that point) and the trailing stop, so it can
+        keep capturing upside instead of being capped at the first target.
+        """
         if self.direction == "LONG":
             if ltp <= self.stop_loss:
                 return True, "STOP_LOSS"
-            if ltp >= self.target:
+            if not self.partial_exit_done and ltp >= self.target:
                 return True, "TARGET_HIT"
             # Trailing stop: activate after 5% gain, trail at 3% below peak
             if self.trailing_sl > 0 and ltp <= self.trailing_sl:
@@ -90,7 +95,7 @@ class Position:
         else:  # SHORT
             if ltp >= self.stop_loss:
                 return True, "STOP_LOSS"
-            if ltp <= self.target:
+            if not self.partial_exit_done and ltp <= self.target:
                 return True, "TARGET_HIT"
             if self.trailing_sl > 0 and ltp >= self.trailing_sl:
                 return True, "TRAILING_STOP"
@@ -478,6 +483,99 @@ def exit_trade(symbol: str, exit_price: float, reason: str = "MANUAL") -> Option
     }
 
 
+def _partial_exit_target(symbol: str, exit_price: float) -> Optional[Dict]:
+    """
+    Target hit: book half the position now, lock that profit in as a closed
+    trade, and let the other half keep running — protected by moving its
+    stop-loss up to breakeven (never worse) and arming the trailing stop at
+    the current price. If the position is too small to split, falls back to
+    a full exit instead.
+    """
+    if symbol not in _state.positions:
+        return None
+    pos = _state.positions[symbol]
+
+    half_qty = pos.quantity // 2
+    if half_qty == 0:
+        return exit_trade(symbol, exit_price, "TARGET_HIT")
+
+    broker = _get_broker()
+    tx_type = "SELL" if pos.direction == "LONG" else "BUY"
+    buffer_mult = 1 + LIMIT_ORDER_BUFFER_PCT / 100 if tx_type == "BUY" else 1 - LIMIT_ORDER_BUFFER_PCT / 100
+    exit_limit_price = _round_to_tick(exit_price * buffer_mult)
+    try:
+        order = broker.place_order(
+            symbol=symbol,
+            transaction_type=tx_type,
+            quantity=half_qty,
+            order_type="LIMIT",
+            price=exit_limit_price,
+            product="CNC" if pos.trade_type == "SWING" else "MIS",
+        )
+    except Exception as e:
+        logger.error(f"Partial exit order failed for {symbol}: {e}")
+        return {"status": "ERROR", "reason": str(e)}
+
+    per_share = (exit_price - pos.entry_price) if pos.direction == "LONG" else (pos.entry_price - exit_price)
+    pnl = per_share * half_qty
+    pnl_pct = pos.current_pnl_pct(exit_price)
+
+    closed = ClosedTrade(
+        symbol=symbol,
+        quantity=half_qty,
+        entry_price=pos.entry_price,
+        exit_price=exit_price,
+        direction=pos.direction,
+        trade_type=pos.trade_type,
+        entry_time=pos.entry_time,
+        exit_time=datetime.now(IST).isoformat(),
+        pnl=round(pnl, 2),
+        pnl_pct=round(pnl_pct, 2),
+        exit_reason="PARTIAL_TARGET_50PCT",
+        order_id=order.get("order_id", "") if order else "",
+        broker=pos.broker,
+        signal_score=pos.signal_score,
+        source=pos.source,
+        reason=pos.reason,
+        risk_amount=pos.risk_amount,
+        capital_at_entry=pos.capital_at_entry,
+    )
+    _state.closed_trades.append(closed)
+    _state.realized_pnl += pnl
+
+    pos.quantity -= half_qty
+    pos.partial_exit_done = True
+    if pos.direction == "LONG":
+        pos.stop_loss = max(pos.stop_loss, pos.entry_price)
+        pos.trailing_sl = round(exit_price * 0.97, 2)
+    else:
+        pos.stop_loss = min(pos.stop_loss, pos.entry_price)
+        pos.trailing_sl = round(exit_price * 1.03, 2)
+    pos.trailing_activated = True
+    _state.save()
+
+    alert_service.alert_partial_target_hit(
+        symbol, pos.entry_price, exit_price, pnl_pct,
+        qty_closed=half_qty, qty_remaining=pos.quantity, new_stop_loss=pos.stop_loss,
+    )
+
+    logger.info(
+        f"Partial target exit {symbol}: booked {half_qty} @ {exit_price} (pnl=₹{pnl:.2f}); "
+        f"{pos.quantity} left, SL now {pos.stop_loss}, trailing {pos.trailing_sl}"
+    )
+    return {
+        "status": "PARTIAL_CLOSED",
+        "symbol": symbol,
+        "qty_closed": half_qty,
+        "qty_remaining": pos.quantity,
+        "pnl": round(pnl, 2),
+        "pnl_pct": round(pnl_pct, 2),
+        "exit_reason": "PARTIAL_TARGET_50PCT",
+        "new_stop_loss": pos.stop_loss,
+        "new_trailing_sl": pos.trailing_sl,
+    }
+
+
 def monitor_positions() -> List[Dict]:
     """
     Check all open positions against current LTP.
@@ -519,8 +617,12 @@ def monitor_positions() -> List[Dict]:
 
         should_exit, reason = pos.should_exit(ltp)
         if should_exit:
-            result = exit_trade(symbol, ltp, reason)
-            actions.append({"symbol": symbol, "action": "EXIT", "reason": reason, "ltp": ltp, "result": result})
+            if reason == "TARGET_HIT":
+                result = _partial_exit_target(symbol, ltp)
+                actions.append({"symbol": symbol, "action": "PARTIAL_EXIT", "reason": reason, "ltp": ltp, "result": result})
+            else:
+                result = exit_trade(symbol, ltp, reason)
+                actions.append({"symbol": symbol, "action": "EXIT", "reason": reason, "ltp": ltp, "result": result})
         else:
             actions.append({"symbol": symbol, "action": "HOLD", "ltp": ltp, "pnl_pct": round(pnl_pct, 2)})
 

@@ -101,6 +101,7 @@ export interface OpenPosition extends TradeReasoning {
   trailing_activated: boolean;
   broker: string;
   order_id: string;
+  partial_exit_done: boolean;
 }
 
 export interface ClosedTrade extends TradeReasoning {
