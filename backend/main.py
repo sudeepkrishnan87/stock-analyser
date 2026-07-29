@@ -32,6 +32,14 @@ _PUBLIC_PATHS = {
     "/api/auth/fyers/postback",     # Fyers order webhook
 }
 
+# Email/WhatsApp one-click approve/reject links — opened from a mail or
+# messaging app, which can't attach X-API-Key. Auth there is instead the
+# per-signal HMAC token verified inside the endpoint itself (see
+# signal_service.verify_action_token / routers/signals.py).
+_PUBLIC_PATH_PREFIXES = (
+    "/api/signals/email-action/",
+)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -89,7 +97,7 @@ async def require_api_key(request: Request, call_next):
     path = request.url.path
 
     # Allow public paths without a key
-    if path in _PUBLIC_PATHS:
+    if path in _PUBLIC_PATHS or path.startswith(_PUBLIC_PATH_PREFIXES):
         return await call_next(request)
 
     # Check X-API-Key header

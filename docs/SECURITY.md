@@ -53,6 +53,12 @@ Sole source of truth for open positions/P&L, plain JSON, no signature/checksum. 
 ### 🟡 Operational, not security: deploy user inconsistency
 `deploy/stockbot.service` runs as `User=sudeep`; `.github/workflows/deploy.yml` and `deploy/setup.sh` both use `ubuntu`. Verify which user actually exists/owns `/opt/stockbot` on the real EC2 box — a mismatch here wouldn't be a vulnerability, just a "deploy silently uses the wrong permissions" bug waiting to surface.
 
+### 🟡 Accepted risk: email/WhatsApp one-click approve/reject bypasses the API key by design
+`GET /api/signals/email-action/{id}/{approve|reject}` (added 2026-07-29) is intentionally exempt from the `X-API-Key` middleware (`main.py`'s `_PUBLIC_PATH_PREFIXES`) — a mail or WhatsApp client can't attach a custom header, only follow a plain link. In its place, the link itself carries an `hmac.new(API_SECRET_KEY, signal_id, sha256)` token (`signal_service._action_token`), verified with `hmac.compare_digest` before anything runs.
+- **Blast radius if a token leaks** (e.g. forwarded email, compromised mail account): bounded to approving or rejecting *that one specific, already-vetted signal* — not arbitrary symbols, not fund transfers, not any other endpoint — and only within its own TTL (20 min intraday/pre-market, ~24h swing). `approve_signal()`/`reject_signal()` already refuse anything not still `PENDING`, so a leaked token is also single-use in practice.
+- **Why accepted rather than avoided**: the whole point is to approve/reject from a phone without the app open, which is incompatible with requiring the master API key on the link. The token is scoped narrowly enough that its exposure is a much smaller concession than exposing `API_SECRET_KEY` itself would be.
+- **Not covered**: email itself isn't end-to-end encrypted and Gmail/WhatsApp account compromise is outside this app's control — if that's ever a real concern, revisit whether this convenience is worth keeping.
+
 ## Checklist before merging any change to auth / secrets / order placement
 
 - [ ] Did you add a new public (unauthenticated) path? If yes, does it verify a signature/checksum from the calling party, not just trust the body?

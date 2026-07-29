@@ -15,6 +15,7 @@ Setup for WhatsApp (Twilio sandbox):
   3. Set TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_WHATSAPP_FROM, TWILIO_WHATSAPP_TO in .env.
 """
 
+import re
 import smtplib
 import logging
 from email.mime.text import MIMEText
@@ -42,6 +43,35 @@ def _now_ist() -> str:
 # Email
 # ─────────────────────────────────────────────────────────────────────────────
 
+_URL_RE = re.compile(r"(https?://\S+)")
+
+
+def _linkify_for_html(text: str) -> str:
+    """
+    Turn any bare https?:// URL in the plain-text body into a tappable button
+    for the HTML email — this is how the approve/reject links (see
+    signal_service.build_action_links) become real one-click buttons instead
+    of raw pasted text. Recognized by the "/approve"/"/reject" path segment
+    those links always carry; anything else just becomes a plain link.
+    """
+    def _render(match: "re.Match") -> str:
+        url = match.group(1)
+        if "/reject?" in url:
+            return (
+                f'<a href="{url}" style="display:inline-block;background:#dc2626;color:#fff;'
+                f'padding:8px 18px;border-radius:6px;text-decoration:none;font-weight:bold;'
+                f'font-family:Arial,sans-serif;font-size:13px;margin:4px 6px 4px 0;">❌ Reject</a>'
+            )
+        if "/approve?" in url:
+            return (
+                f'<a href="{url}" style="display:inline-block;background:#16a34a;color:#fff;'
+                f'padding:8px 18px;border-radius:6px;text-decoration:none;font-weight:bold;'
+                f'font-family:Arial,sans-serif;font-size:13px;margin:4px 6px 4px 0;">✅ Approve</a>'
+            )
+        return f'<a href="{url}" style="color:#60a5fa;">{url}</a>'
+    return _URL_RE.sub(_render, text)
+
+
 def _build_email_html(subject: str, body: str) -> str:
     return f"""
     <html><body style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;">
@@ -49,7 +79,7 @@ def _build_email_html(subject: str, body: str) -> str:
       <h2 style="color:#f0c040;margin-top:0;">📈 Stock Alert — {_now_ist()}</h2>
       <h3 style="color:#fff;border-bottom:1px solid #444;padding-bottom:8px;">{subject}</h3>
       <div style="background:#16213e;padding:15px;border-radius:6px;white-space:pre-wrap;
-                  font-family:monospace;font-size:14px;line-height:1.6;">{body}</div>
+                  font-family:monospace;font-size:14px;line-height:1.6;">{_linkify_for_html(body)}</div>
       <p style="color:#888;font-size:12px;margin-top:20px;">
         Sent by Stock Analyser AI | Trade at your own risk.
       </p>
@@ -138,7 +168,25 @@ def get_alert_history() -> List[Dict]:
 # Pre-built alert formatters
 # ─────────────────────────────────────────────────────────────────────────────
 
-def alert_breakout(symbol: str, signal: Dict, fundamentals: Optional[Dict] = None) -> Dict:
+def format_action_lines(action_links: Optional[Dict[str, str]]) -> List[str]:
+    """
+    Shared two-line "approve/reject" block appended to any alert body that has
+    a pending signal behind it. Kept as one function so every scan job (and the
+    HTML linkifier above, which recognizes these URLs by their /approve or
+    /reject path segment) formats it identically.
+    """
+    if not action_links:
+        return []
+    return [
+        f"   ✅ APPROVE: {action_links['approve']}",
+        f"   ❌ REJECT:  {action_links['reject']}",
+    ]
+
+
+def alert_breakout(
+    symbol: str, signal: Dict, fundamentals: Optional[Dict] = None,
+    action_links: Optional[Dict[str, str]] = None,
+) -> Dict:
     sig_type = signal.get("signal_type", "SIGNAL")
     direction = signal.get("direction", "")
     emoji = "🚀" if direction == "BULLISH" else "📉"
@@ -165,6 +213,9 @@ def alert_breakout(symbol: str, signal: Dict, fundamentals: Optional[Dict] = Non
             f"EBITDA Mgn  : {fundamentals.get('ebitda_margin_pct', 'N/A')}%",
             f"Fund Score  : {fundamentals.get('fundamental_score', 'N/A')}/100 ({fundamentals.get('fundamental_grade', 'N/A')})",
         ]
+
+    if action_links:
+        lines += ["", ""] + format_action_lines(action_links)
 
     body = "\n".join(lines)
     return send_alert(f"{emoji} {sig_type}: {symbol}", body)

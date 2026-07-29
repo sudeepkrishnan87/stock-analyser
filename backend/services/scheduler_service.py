@@ -127,7 +127,7 @@ def job_premarket_scan():
                         f"   Entry: ₹{ts['entry']} | SL: ₹{ts['stop_loss']} | "
                         f"Target: ₹{ts['target']} | R:R 1:{ts['rr_ratio']}"
                     )
-                    signal_service.add_pending_signal(
+                    sig = signal_service.add_pending_signal(
                         symbol=r["symbol"],
                         signal=r["signal"],
                         signal_score=r.get("signal_score", 0),
@@ -136,6 +136,7 @@ def job_premarket_scan():
                         breakout_signal=_breakout_summary(r.get("breakout_signal")),
                         ttl_minutes=ttl,
                     )
+                    lines += alert_service.format_action_lines(signal_service.build_action_links(sig.id))
             body = "\n".join(lines)
             alert_service.send_alert("Pre-Market Top Picks", body)
             logger.info(f"[SCHEDULER] Pre-market scan found {len(results)} candidates.")
@@ -180,17 +181,18 @@ def job_intraday_scan():
                 # Alert + queue for approval — no trade is ever placed without explicit
                 # human approval. See docs/SECURITY.md "no global paper-trading switch" finding.
                 if r.get("breakout_signal") and r["signal"] == "STRONG BUY":
-                    alert_service.alert_breakout(
-                        r["symbol"], r["breakout_signal"],
-                        fundamentals=r.get("fundamentals"),
-                    )
-                    signal_service.add_pending_signal(
+                    sig = signal_service.add_pending_signal(
                         symbol=r["symbol"],
                         signal=r["signal"],
                         signal_score=r.get("signal_score", 0),
                         trade_suggestion=r["trade_suggestion"],
                         source="INTRADAY",
                         breakout_signal=_breakout_summary(r.get("breakout_signal")),
+                    )
+                    alert_service.alert_breakout(
+                        r["symbol"], r["breakout_signal"],
+                        fundamentals=r.get("fundamentals"),
+                        action_links=signal_service.build_action_links(sig.id),
                     )
     except Exception as e:
         logger.error(f"[SCHEDULER] Intraday scan error: {e}")
@@ -274,7 +276,7 @@ def job_swing_scan():
                     # ~24h — meant for next trading day's entry, not today's. Approximate:
                     # doesn't account for weekends, so a Friday swing pick reads as
                     # "valid ~1 day" even though the next session is Monday.
-                    signal_service.add_pending_signal(
+                    sig = signal_service.add_pending_signal(
                         symbol=r["symbol"],
                         signal=r["signal"],
                         signal_score=r.get("signal_score", 0),
@@ -282,6 +284,7 @@ def job_swing_scan():
                         source="SWING",
                         ttl_minutes=24 * 60,
                     )
+                    lines += alert_service.format_action_lines(signal_service.build_action_links(sig.id))
                 if fund.get("pe_ratio"):
                     lines.append(
                         f"   PE: {fund['pe_ratio']} | "

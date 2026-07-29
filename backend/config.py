@@ -104,6 +104,12 @@ class Settings:
         if o.strip()
     ]
 
+    # ── Public base URL ───────────────────────────────────────────────────────
+    # Used to build absolute links for the email/WhatsApp one-click approve/reject
+    # buttons — those are opened from a mail or messaging app, so relative URLs
+    # won't resolve.
+    PUBLIC_APP_URL: str = os.getenv("PUBLIC_APP_URL", "https://jarvis.mytechexp.com")
+
     # ── In-memory session tokens ─────────────────────────────────────────────
     _kite_access_token: str = ""
     _fyers_access_token: str = ""

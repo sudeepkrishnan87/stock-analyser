@@ -12,6 +12,8 @@ In-memory only, by design: even the longest-lived signals (swing, ~24h) don't
 need to survive a process restart the way trades.json does.
 """
 
+import hashlib
+import hmac
 import logging
 import uuid
 from dataclasses import asdict, dataclass
@@ -19,6 +21,8 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 
 import pytz
+
+from config import settings
 
 logger = logging.getLogger(__name__)
 IST = pytz.timezone("Asia/Kolkata")
@@ -48,6 +52,34 @@ class PendingSignal:
 
 
 _pending: Dict[str, PendingSignal] = {}
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Email/WhatsApp one-click action links
+#
+# A mail or messaging app can't attach the X-API-Key header, so a plain link
+# click needs its own, narrower authorization: an HMAC of the signal_id keyed
+# on the same API_SECRET_KEY (one-way — leaking the token never reveals the
+# key itself). It grants nothing beyond approving/rejecting that one specific,
+# already-vetted signal, and only within its own TTL — approve_signal() and
+# reject_signal() already refuse anything not still PENDING.
+# ─────────────────────────────────────────────────────────────────────────────
+
+def _action_token(signal_id: str) -> str:
+    return hmac.new(settings.API_SECRET_KEY.encode(), signal_id.encode(), hashlib.sha256).hexdigest()[:24]
+
+
+def verify_action_token(signal_id: str, token: str) -> bool:
+    return bool(token) and hmac.compare_digest(token, _action_token(signal_id))
+
+
+def build_action_links(signal_id: str) -> Dict[str, str]:
+    base = settings.PUBLIC_APP_URL.rstrip("/")
+    token = _action_token(signal_id)
+    return {
+        "approve": f"{base}/api/signals/email-action/{signal_id}/approve?token={token}",
+        "reject": f"{base}/api/signals/email-action/{signal_id}/reject?token={token}",
+    }
 
 
 def add_pending_signal(
