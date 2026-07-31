@@ -91,9 +91,15 @@ def email_action(signal_id: str, action: str, token: str = Query(...)):
     symbol = result.get("symbol", signal_id)
     if action == "approve":
         if status == "EXECUTED":
-            detail = f"Order placed: qty {result.get('quantity')} @ ₹{result.get('entry_price')}"
+            heading = f"✅ Order placed — {symbol}"
+            detail = f"Qty {result.get('quantity')} @ ₹{result.get('entry_price')}"
         else:
+            # Approving the signal succeeded, but trading_service.enter_trade()
+            # itself refused the order (risk gate, R:R, zero position size, etc.)
+            # — the heading must say so plainly, not "Approved", or a rejected
+            # trade reads as a success on a quick mobile glance.
+            heading = f"❌ Not placed — {symbol}"
             detail = result.get("reason", status)
-        return HTMLResponse(_action_page(f"✅ Approved — {symbol}", detail, ok=(status == "EXECUTED")))
+        return HTMLResponse(_action_page(heading, detail, ok=(status == "EXECUTED")))
 
     return HTMLResponse(_action_page(f"❌ Rejected — {symbol}", "No order was placed.", ok=True))
