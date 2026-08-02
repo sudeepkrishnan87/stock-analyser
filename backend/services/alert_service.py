@@ -168,6 +168,23 @@ def get_alert_history() -> List[Dict]:
 # Pre-built alert formatters
 # ─────────────────────────────────────────────────────────────────────────────
 
+def format_quantity_line(estimate: Optional[Dict]) -> str:
+    """
+    One line showing how many shares the 2%-risk sizing formula would buy
+    right now — see trading_service.estimate_quantity(). Falls back to a
+    clearly-labeled hypothetical ₹10,000 balance if real funds aren't
+    available, rather than silently showing 0.
+    """
+    if not estimate:
+        return ""
+    qty = estimate.get("quantity", 0)
+    investment = estimate.get("investment", 0)
+    funds = estimate.get("available_funds", 0)
+    if estimate.get("is_hypothetical"):
+        return f"   Est. Qty  : {qty} shares (₹{investment:,.0f}) — hypothetical @ ₹{funds:,.0f} balance, no live funds found"
+    return f"   Est. Qty  : {qty} shares (₹{investment:,.0f}) @ 2% risk, ₹{funds:,.0f} available"
+
+
 def format_action_lines(action_links: Optional[Dict[str, str]]) -> List[str]:
     """
     Shared two-line "approve/reject" block appended to any alert body that has
@@ -186,6 +203,7 @@ def format_action_lines(action_links: Optional[Dict[str, str]]) -> List[str]:
 def alert_breakout(
     symbol: str, signal: Dict, fundamentals: Optional[Dict] = None,
     action_links: Optional[Dict[str, str]] = None,
+    quantity_estimate: Optional[Dict] = None,
 ) -> Dict:
     sig_type = signal.get("signal_type", "SIGNAL")
     direction = signal.get("direction", "")
@@ -204,6 +222,9 @@ def alert_breakout(
         f"Target      : ₹{signal.get('suggested_target', 0):.2f}",
         f"R:R Ratio   : 1:{signal.get('rr_ratio', 0):.1f}",
     ]
+
+    if quantity_estimate:
+        lines.append(format_quantity_line(quantity_estimate))
 
     if fundamentals:
         lines += [

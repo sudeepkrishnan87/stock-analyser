@@ -75,6 +75,10 @@ export interface PendingSignal {
   created_at: string;
   expires_at: string;
   status: "PENDING" | "APPROVED" | "REJECTED" | "EXPIRED";
+  est_quantity: number;
+  est_investment: number;
+  est_available_funds: number;
+  est_is_hypothetical: boolean;
 }
 
 // Shared "why was this trade taken" fields — present on both open positions

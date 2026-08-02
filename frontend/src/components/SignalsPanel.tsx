@@ -114,6 +114,17 @@ export default function SignalsPanel({ signals, onResolved }: Props) {
             </div>
           </div>
           <p className="text-slate-500 text-xs mt-2">R:R 1:{s.rr_ratio}</p>
+          <p className="text-xs mt-1">
+            <span className="text-slate-500">Est. Qty: </span>
+            <span className="font-semibold text-slate-300">
+              {s.est_quantity} shares (₹{s.est_investment.toLocaleString("en-IN")})
+            </span>
+            {s.est_is_hypothetical ? (
+              <span className="text-amber-400"> — hypothetical @ ₹{s.est_available_funds.toLocaleString("en-IN")} balance, no live funds found</span>
+            ) : (
+              <span className="text-slate-500"> @ 2% risk, ₹{s.est_available_funds.toLocaleString("en-IN")} available</span>
+            )}
+          </p>
 
           {resultMsg[s.id] ? (
             <p className="mt-4 text-sm text-slate-300 bg-slate-900/60 rounded-lg px-3 py-2">

@@ -265,6 +265,55 @@ def calculate_position_size(entry: float, stop_loss: float, broker: Optional[Bas
     return max(0, shares)
 
 
+# Used only when real broker funds can't be determined (not authenticated, API
+# error, or a genuinely empty account) — an illustrative stand-in so a signal
+# still shows *some* quantity estimate instead of a bare 0, per the operator's
+# explicit request. Not tied to settings.TRADING_CAPITAL, which is the real
+# persisted figure — this is deliberately a fixed placeholder.
+HYPOTHETICAL_CAPITAL = 10_000.0
+
+
+def estimate_quantity(entry_price: float, stop_loss: float) -> Dict:
+    """
+    Preview how many shares the 2%-risk sizing formula would actually buy
+    right now, without placing anything — same math calculate_position_size()
+    uses at real order time, surfaced for display in alerts/the Signals tab
+    so the likely fill size is visible before approving. Falls back to a
+    clearly-labeled hypothetical ₹10,000 balance if real available funds
+    can't be fetched.
+    """
+    broker = None
+    available_funds = 0.0
+    try:
+        broker = _get_broker()
+        available_funds = broker.get_available_funds()
+    except Exception as e:
+        logger.warning(f"Could not fetch available funds for quantity estimate: {e}")
+
+    if available_funds and available_funds > 0:
+        qty = calculate_position_size(entry_price, stop_loss, broker=broker)
+        return {
+            "quantity": qty,
+            "investment": round(qty * entry_price, 2),
+            "available_funds": round(available_funds, 2),
+            "is_hypothetical": False,
+        }
+
+    risk_amount = HYPOTHETICAL_CAPITAL * (settings.MAX_RISK_PER_TRADE_PCT / 100)
+    risk_per_share = abs(entry_price - stop_loss)
+    qty = 0
+    if risk_per_share >= 0.01 and entry_price > 0:
+        qty = int(risk_amount / risk_per_share)
+        max_deployable = HYPOTHETICAL_CAPITAL * (settings.MAX_PORTFOLIO_EXPOSURE_PCT / 100)
+        qty = max(0, min(qty, int(max_deployable / entry_price)))
+    return {
+        "quantity": qty,
+        "investment": round(qty * entry_price, 2),
+        "available_funds": HYPOTHETICAL_CAPITAL,
+        "is_hypothetical": True,
+    }
+
+
 def _round_to_tick(price: float, tick: float = 0.05) -> float:
     """NSE equity tick size is 0.05 — snap to the nearest valid tick or the broker rejects the order."""
     return round(round(price / tick) * tick, 2)

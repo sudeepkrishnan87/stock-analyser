@@ -49,6 +49,13 @@ class PendingSignal:
     expires_at: str
     status: str = "PENDING"   # PENDING | APPROVED | REJECTED | EXPIRED
     resolution: Optional[Dict] = None
+    # How many shares the 2%-risk sizing formula would actually buy right now —
+    # computed once at signal creation so email/WhatsApp and the Signals tab
+    # always show the same number. See trading_service.estimate_quantity().
+    est_quantity: int = 0
+    est_investment: float = 0.0
+    est_available_funds: float = 0.0
+    est_is_hypothetical: bool = False
 
 
 _pending: Dict[str, PendingSignal] = {}
@@ -113,6 +120,14 @@ def add_pending_signal(
         created_at=now.isoformat(),
         expires_at=(now + timedelta(minutes=ttl)).isoformat(),
     )
+
+    from services import trading_service
+    estimate = trading_service.estimate_quantity(sig.entry, sig.stop_loss)
+    sig.est_quantity = estimate["quantity"]
+    sig.est_investment = estimate["investment"]
+    sig.est_available_funds = estimate["available_funds"]
+    sig.est_is_hypothetical = estimate["is_hypothetical"]
+
     _pending[sig.id] = sig
     logger.info(f"[SIGNALS] Queued {symbol} for approval ({source}, {signal}, score {signal_score})")
     return sig

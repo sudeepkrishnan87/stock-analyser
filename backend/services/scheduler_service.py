@@ -48,6 +48,16 @@ def _breakout_summary(breakout: Optional[dict]) -> Optional[str]:
     return breakout.get("message") or f"{breakout.get('signal_type', 'Breakout')} ({breakout.get('direction', '')})"
 
 
+def _estimate_dict(sig) -> dict:
+    """PendingSignal's est_* fields, repackaged for alert_service.format_quantity_line()."""
+    return {
+        "quantity": sig.est_quantity,
+        "investment": sig.est_investment,
+        "available_funds": sig.est_available_funds,
+        "is_hypothetical": sig.est_is_hypothetical,
+    }
+
+
 def _minutes_until(hour: int, minute: int) -> int:
     """Minutes from now until today's given IST clock time (floor of 1 minute if already past)."""
     now = datetime.now(IST)
@@ -136,6 +146,7 @@ def job_premarket_scan():
                         breakout_signal=_breakout_summary(r.get("breakout_signal")),
                         ttl_minutes=ttl,
                     )
+                    lines.append(alert_service.format_quantity_line(_estimate_dict(sig)))
                     lines += alert_service.format_action_lines(signal_service.build_action_links(sig.id))
             body = "\n".join(lines)
             alert_service.send_alert("Pre-Market Top Picks", body)
@@ -193,6 +204,7 @@ def job_intraday_scan():
                         r["symbol"], r["breakout_signal"],
                         fundamentals=r.get("fundamentals"),
                         action_links=signal_service.build_action_links(sig.id),
+                        quantity_estimate=_estimate_dict(sig),
                     )
     except Exception as e:
         logger.error(f"[SCHEDULER] Intraday scan error: {e}")
@@ -284,6 +296,7 @@ def job_swing_scan():
                         source="SWING",
                         ttl_minutes=24 * 60,
                     )
+                    lines.append(alert_service.format_quantity_line(_estimate_dict(sig)))
                     lines += alert_service.format_action_lines(signal_service.build_action_links(sig.id))
                 if fund.get("pe_ratio"):
                     lines.append(
