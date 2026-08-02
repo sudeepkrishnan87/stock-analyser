@@ -205,3 +205,14 @@ def broker_orders():
         return {"orders": broker.get_orders()}
     except Exception as e:
         raise HTTPException(status_code=502, detail=str(e))
+
+
+@router.get("/broker/funds")
+def broker_funds():
+    """Live tradable margin directly from the broker — same figure calculate_position_size()
+    already uses as a hard cap, exposed here so it can be checked without placing an order."""
+    try:
+        broker = _get_broker()
+        return {"available_funds": broker.get_available_funds()}
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=str(e))
