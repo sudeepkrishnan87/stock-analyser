@@ -232,6 +232,29 @@ def _get_broker() -> BaseBroker:
     return ZerodhaBroker()
 
 
+def _effective_capital(broker: Optional[BaseBroker]) -> float:
+    """
+    _state.capital is a manually-set snapshot (see docs/DEPLOYMENT.md) that
+    goes stale the moment real funds change or a new position gets deployed —
+    twice now that staleness has silently zeroed out position sizing for
+    days (capital said ₹14,039.80 while the account actually held ₹15,880.60
+    and deployment had crept up from an already-approved trade). Rather than
+    require a manual refresh every time, float the exposure-cap basis up to
+    whatever's bigger: the saved snapshot, or (live free cash + capital
+    already deployed) — i.e. the real current account size. Never floats
+    *down* from the snapshot, and any funds-fetch failure just falls back to
+    the snapshot exactly as before.
+    """
+    if broker is None:
+        return _state.capital
+    try:
+        available_funds = broker.get_available_funds()
+        return max(_state.capital, available_funds + _state.deployed_capital)
+    except Exception as e:
+        logger.warning(f"Could not fetch available funds — sizing off saved capital only: {e}")
+        return _state.capital
+
+
 def calculate_position_size(entry: float, stop_loss: float, broker: Optional[BaseBroker] = None) -> int:
     """
     Risk-based position sizing.
@@ -243,14 +266,15 @@ def calculate_position_size(entry: float, stop_loss: float, broker: Optional[Bas
     (transient API issue) falls back to the configured-capital-only cap
     rather than blocking the trade.
     """
-    risk_amount = _state.capital * (settings.MAX_RISK_PER_TRADE_PCT / 100)
+    capital = _effective_capital(broker)
+    risk_amount = capital * (settings.MAX_RISK_PER_TRADE_PCT / 100)
     risk_per_share = abs(entry - stop_loss)
     if risk_per_share < 0.01:
         return 0
     shares = int(risk_amount / risk_per_share)
 
     # Cap so total deployment stays within the configured limit
-    max_deployable = _state.capital * (settings.MAX_PORTFOLIO_EXPOSURE_PCT / 100) - _state.deployed_capital
+    max_deployable = capital * (settings.MAX_PORTFOLIO_EXPOSURE_PCT / 100) - _state.deployed_capital
     if max_deployable <= 0:
         return 0
     shares = min(shares, int(max_deployable / entry))
@@ -332,7 +356,12 @@ def can_enter_trade() -> Tuple[bool, str]:
         return False, f"Max {settings.MAX_OPEN_POSITIONS} positions already open."
     if _state.daily_pnl_pct <= -(settings.DAILY_LOSS_LIMIT_PCT):
         return False, f"Daily loss limit {settings.DAILY_LOSS_LIMIT_PCT}% reached."
-    if _state.deployment_pct >= settings.MAX_PORTFOLIO_EXPOSURE_PCT:
+    # Same live-vs-saved capital basis as calculate_position_size() — otherwise
+    # this gate can silently strangle new trades the same way _state.capital
+    # going stale already did once (see _effective_capital's docstring).
+    capital = _effective_capital(_get_broker())
+    deployment_pct = (_state.deployed_capital / capital * 100) if capital > 0 else 0
+    if deployment_pct >= settings.MAX_PORTFOLIO_EXPOSURE_PCT:
         return False, "Max portfolio exposure reached."
     return True, "OK"
 
@@ -696,6 +725,10 @@ def exit_all_intraday() -> List[Dict]:
 
 def portfolio_summary() -> Dict:
     now_ist = datetime.now(IST)
+    # can_enter_trade() now makes a live broker call (see _effective_capital) —
+    # call it once and reuse, rather than the 2-3x it was silently re-evaluated
+    # inline below before this comment was added.
+    can_trade, block_reason = can_enter_trade()
     return {
         "capital": round(_state.capital, 2),
         "deployed_capital": round(_state.deployed_capital, 2),
@@ -711,8 +744,8 @@ def portfolio_summary() -> Dict:
         "qtd_pnl_pct": round(_state.qtd_pnl() / _state.capital * 100, 2),
         "total_trades": len(_state.closed_trades),
         "win_rate": round(_state.win_rate(), 1),
-        "can_trade": can_enter_trade()[0],
-        "trade_block_reason": can_enter_trade()[1] if not can_enter_trade()[0] else None,
+        "can_trade": can_trade,
+        "trade_block_reason": block_reason if not can_trade else None,
         "timestamp": now_ist.strftime("%Y-%m-%d %H:%M:%S IST"),
     }
 
