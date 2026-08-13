@@ -40,6 +40,7 @@ class ZerodhaBroker(BaseBroker):
                 "instrument_token": inst["instrument_token"],
                 "name": inst["name"],
                 "exchange": inst["exchange"],
+                "tick_size": inst.get("tick_size"),
             }
         for inst in kite.instruments("BSE"):
             key = f"BSE:{inst['tradingsymbol']}"
@@ -47,6 +48,7 @@ class ZerodhaBroker(BaseBroker):
                 "instrument_token": inst["instrument_token"],
                 "name": inst["name"],
                 "exchange": "BSE",
+                "tick_size": inst.get("tick_size"),
             }
         _instruments_loaded = True
 
@@ -61,6 +63,24 @@ class ZerodhaBroker(BaseBroker):
             raise ValueError(f"Symbol '{symbol}' not found on NSE.")
         info = _instruments_cache[symbol]
         return str(info["instrument_token"]), info["name"]
+
+    def get_tick_size(self, symbol: str, exchange: str = "NSE") -> float:
+        """
+        Real per-symbol tick size from Kite's instrument master — NSE sets this
+        per-security, not uniformly 0.05 (SBIN, for one, is 0.10). Placing a
+        LIMIT order off the wrong multiple gets rejected outright by Zerodha,
+        which previously happened silently on every SBIN approval (see
+        docs/SECURITY.md-adjacent incident notes / trading_service.py).
+        """
+        kite = self._client()
+        self._load_instruments(kite)
+        key = symbol.upper().strip().replace(".NS", "").replace(".BO", "")
+        if exchange == "BSE":
+            key = f"BSE:{key}"
+        info = _instruments_cache.get(key)
+        if info and info.get("tick_size"):
+            return float(info["tick_size"])
+        return 0.05
 
     def fetch_historical(self, instrument_key: str, interval: str, days_back: int) -> List[Dict]:
         kite = self._client()

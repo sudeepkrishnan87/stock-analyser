@@ -339,8 +339,23 @@ def estimate_quantity(entry_price: float, stop_loss: float) -> Dict:
 
 
 def _round_to_tick(price: float, tick: float = 0.05) -> float:
-    """NSE equity tick size is 0.05 — snap to the nearest valid tick or the broker rejects the order."""
+    """Snap to the nearest valid tick — a price off-multiple gets the whole order rejected by the broker."""
     return round(round(price / tick) * tick, 2)
+
+
+def _tick_size_for(broker: BaseBroker, symbol: str) -> float:
+    """
+    Most NSE/BSE equities tick in 0.05, but it's set per-symbol by the
+    exchange, not universal — SBIN, for one, is 0.10. A LIMIT order priced
+    off the wrong multiple is rejected outright (this silently blocked every
+    SBIN approval until this fetch existed). Falls back to 0.05 if the lookup
+    itself fails, same as before.
+    """
+    try:
+        return broker.get_tick_size(symbol)
+    except Exception as e:
+        logger.warning(f"Could not fetch tick size for {symbol} — assuming 0.05: {e}")
+        return 0.05
 
 
 # Marketable-limit buffer beyond live LTP — Zerodha's API rejects plain MARKET
@@ -417,7 +432,7 @@ def enter_trade(
         logger.warning(f"Could not fetch LTP for {symbol}, using signal entry price instead: {e}")
         ltp = entry_price
     buffer_mult = 1 + LIMIT_ORDER_BUFFER_PCT / 100 if tx_type == "BUY" else 1 - LIMIT_ORDER_BUFFER_PCT / 100
-    limit_price = _round_to_tick(ltp * buffer_mult)
+    limit_price = _round_to_tick(ltp * buffer_mult, _tick_size_for(broker, symbol))
 
     if dry_run:
         return {
@@ -503,7 +518,7 @@ def exit_trade(symbol: str, exit_price: float, reason: str = "MANUAL") -> Option
     # from the caller (monitor_positions / exit_all_intraday), so price the
     # marketable LIMIT directly off it rather than re-fetching.
     buffer_mult = 1 + LIMIT_ORDER_BUFFER_PCT / 100 if tx_type == "BUY" else 1 - LIMIT_ORDER_BUFFER_PCT / 100
-    exit_limit_price = _round_to_tick(exit_price * buffer_mult)
+    exit_limit_price = _round_to_tick(exit_price * buffer_mult, _tick_size_for(broker, symbol))
     try:
         order = broker.place_order(
             symbol=symbol,
@@ -580,7 +595,7 @@ def _partial_exit_target(symbol: str, exit_price: float) -> Optional[Dict]:
     broker = _get_broker()
     tx_type = "SELL" if pos.direction == "LONG" else "BUY"
     buffer_mult = 1 + LIMIT_ORDER_BUFFER_PCT / 100 if tx_type == "BUY" else 1 - LIMIT_ORDER_BUFFER_PCT / 100
-    exit_limit_price = _round_to_tick(exit_price * buffer_mult)
+    exit_limit_price = _round_to_tick(exit_price * buffer_mult, _tick_size_for(broker, symbol))
     try:
         order = broker.place_order(
             symbol=symbol,

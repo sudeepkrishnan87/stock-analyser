@@ -33,6 +33,16 @@ class BaseBroker(ABC):
         """Returns available cash/margin for equity trading, in INR."""
         ...
 
+    def get_tick_size(self, symbol: str, exchange: str = "NSE") -> float:
+        """
+        Minimum price increment for this symbol — most NSE/BSE equities are
+        0.05, but some (e.g. SBIN) are 0.10 or another exchange-set multiple;
+        a LIMIT order priced off the wrong tick is rejected outright. Default
+        here is the safe fallback for brokers that can't look this up from
+        real instrument metadata; override where possible (see ZerodhaBroker).
+        """
+        return 0.05
+
     @abstractmethod
     def place_order(
         self,
