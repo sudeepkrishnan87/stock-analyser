@@ -13,6 +13,7 @@ import CandlestickPatterns from "./components/CandlestickPatterns";
 import QuarterlyCard from "./components/QuarterlyCard";
 import SignalsPanel from "./components/SignalsPanel";
 import TradeBook from "./components/TradeBook";
+import TradeSetupCard from "./components/TradeSetupCard";
 import { useFaviconBadge } from "./hooks/useFaviconBadge";
 
 const BASE_TITLE = "AI Stock Analyser — Indian Markets";
@@ -225,6 +226,8 @@ export default function App() {
                 </div>
               </div>
             </div>
+
+            <TradeSetupCard symbol={analysis.symbol} />
 
             <AIAnalysisPanel analysis={analysis.ai_analysis} currentPrice={analysis.current_price} />
 

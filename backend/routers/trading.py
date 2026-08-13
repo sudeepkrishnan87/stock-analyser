@@ -40,6 +40,13 @@ class TradeRequest(BaseModel):
     target: float
     trade_type: str = "SWING"        # SWING | INTRADAY
     product: str = "CNC"             # CNC | MIS
+    # Optional — lets a caller (e.g. the Research tab's manual "Approve &
+    # Enter" action) record *why* this trade was taken, same as the
+    # Signals-tab approval path, so the Trade Book stays consistent instead
+    # of showing a blank MANUAL/score-0 entry for these.
+    signal_score: float = 0.0
+    source: str = "MANUAL"
+    reason: str = ""
 
 
 @router.get("/portfolio")
@@ -113,6 +120,9 @@ def enter_trade(req: TradeRequest):
         target=req.target,
         trade_type=req.trade_type,
         product=req.product,
+        signal_score=req.signal_score,
+        source=req.source,
+        reason=req.reason,
     )
     if result and result.get("status") in ("REJECTED", "ERROR"):
         raise HTTPException(status_code=400, detail=result.get("reason", "Trade failed"))

@@ -81,6 +81,41 @@ export interface PendingSignal {
   est_is_hypothetical: boolean;
 }
 
+export interface TradeSuggestion {
+  entry: number;
+  stop_loss: number;
+  target: number;
+  rr_ratio: number;
+  trade_type: "SWING" | "INTRADAY";
+  risk_reward: string;
+}
+
+// Minimal shape of GET /api/scanner/symbol/{symbol} actually used by the
+// Research tab's Trade Setup card — the endpoint returns much more
+// (indicators, waves, patterns) that this view doesn't need.
+export interface ScanSymbolResult {
+  symbol: string;
+  signal: "STRONG BUY" | "BUY" | "WATCH" | "NEUTRAL";
+  signal_score: number;
+  current_price?: number;
+  trade_suggestion?: TradeSuggestion;
+  error?: string;
+}
+
+export interface DryRunResult {
+  status: string;
+  quantity: number;
+  entry_price: number;
+  limit_price: number;
+  stop_loss: number;
+  target: number;
+  trade_type: string;
+  risk_amount: number;
+  max_profit: number;
+  rr_ratio: number;
+  reason?: string;
+}
+
 // Shared "why was this trade taken" fields — present on both open positions
 // and closed trades, sourced from the signal that was approved (or "MANUAL"
 // defaults for trades entered outside the Signals tab).

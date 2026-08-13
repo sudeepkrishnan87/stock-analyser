@@ -1,5 +1,5 @@
 import axios, { type InternalAxiosRequestConfig } from "axios";
-import type { StockAnalysisResponse, PendingSignal, PortfolioSummary, OpenPosition, ClosedTrade } from "../types";
+import type { StockAnalysisResponse, PendingSignal, PortfolioSummary, OpenPosition, ClosedTrade, ScanSymbolResult, DryRunResult } from "../types";
 
 // ── API key must match API_SECRET_KEY in backend .env ─────────────────────
 // Store in localStorage so you only paste it once
@@ -68,7 +68,7 @@ export async function scanIntraday() {
   return data;
 }
 
-export async function scanSymbol(symbol: string) {
+export async function scanSymbol(symbol: string): Promise<ScanSymbolResult> {
   const { data } = await api.get(`/scanner/symbol/${symbol}?include_fundamentals=true`);
   return data;
 }
@@ -97,7 +97,7 @@ export async function getTradeHistory(limit = 100): Promise<{ trades: ClosedTrad
 export async function dryRunTrade(payload: {
   symbol: string; direction: string; entry_price: number;
   stop_loss: number; target: number; trade_type: string;
-}) {
+}): Promise<DryRunResult> {
   const { data } = await api.post("/trading/dry-run", payload);
   return data;
 }
@@ -105,6 +105,7 @@ export async function dryRunTrade(payload: {
 export async function enterTrade(payload: {
   symbol: string; direction: string; entry_price: number;
   stop_loss: number; target: number; trade_type: string; product: string;
+  signal_score?: number; source?: string; reason?: string;
 }) {
   const { data } = await api.post("/trading/enter", payload);
   return data;
