@@ -81,6 +81,11 @@ export default function SignalsPanel({ signals, onResolved }: Props) {
             <div>
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="text-xl font-bold tracking-wide">{s.symbol}</span>
+                {s.direction === "SHORT" && (
+                  <span className="text-xs font-bold px-2 py-0.5 rounded-full bg-red-500/20 text-red-300 border border-red-500/40">
+                    SHORT SELL
+                  </span>
+                )}
                 <span className="text-xs font-semibold px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-400 border border-amber-500/40">
                   {s.signal}
                 </span>
@@ -135,10 +140,14 @@ export default function SignalsPanel({ signals, onResolved }: Props) {
               <button
                 onClick={() => act(s.id, "approve")}
                 disabled={busyId === s.id}
-                className="flex-1 bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50 text-white text-sm font-semibold py-2 rounded-lg transition-colors"
+                className={`flex-1 disabled:opacity-50 text-white text-sm font-semibold py-2 rounded-lg transition-colors ${
+                  s.direction === "SHORT" ? "bg-red-600 hover:bg-red-500" : "bg-emerald-600 hover:bg-emerald-500"
+                }`}
               >
                 {busyId === s.id
                   ? "Placing order…"
+                  : s.direction === "SHORT"
+                  ? "Approve & Sell Short (MIS)"
                   : `Approve & Enter (${s.trade_type === "INTRADAY" ? "MIS" : "CNC"})`}
               </button>
               <button

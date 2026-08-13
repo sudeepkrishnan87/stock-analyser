@@ -38,6 +38,11 @@ BULLISH_CANDLES = {
     "Engulfing",
 }
 
+BEARISH_CANDLES = {
+    "Shooting Star", "Evening Star", "Gravestone Doji",
+    "Three Black Crows", "Dark Cloud Cover", "Engulfing",
+}
+
 
 def _volume_score(indicators: Dict) -> int:
     vr = indicators.get("volume_ratio", 0) or 0
@@ -60,6 +65,18 @@ def _rsi_score(indicators: Dict) -> int:
     return 0   # <35 (too weak) or >70 (overbought)
 
 
+def _rsi_score_short(indicators: Dict) -> int:
+    rsi = indicators.get("rsi")
+    if rsi is None:
+        return 0
+    # Sweet spot: 35-55 (already trending down, not yet oversold-bounce risk)
+    if 35 <= rsi <= 55: return 15
+    if 55 < rsi <= 60:  return 10
+    if 30 <= rsi < 35:  return 8
+    if 60 < rsi <= 70:  return 5
+    return 0   # <30 (oversold, bounce risk) or >70 (still strong bullish momentum)
+
+
 def _bollinger_score(df: pd.DataFrame, indicators: Dict) -> int:
     bb_lower = indicators.get("bb_lower")
     bb_middle = indicators.get("bb_middle")
@@ -75,6 +92,23 @@ def _bollinger_score(df: pd.DataFrame, indicators: Dict) -> int:
     if position <= 0.2:   return 15   # Near lower band — oversold, mean reversion
     if position <= 0.35:  return 10
     if 0.5 <= position <= 0.7: return 8  # Above middle — bullish momentum
+    return 3
+
+
+def _bollinger_score_short(df: pd.DataFrame, indicators: Dict) -> int:
+    bb_lower = indicators.get("bb_lower")
+    bb_middle = indicators.get("bb_middle")
+    bb_upper = indicators.get("bb_upper")
+    if not all([bb_lower, bb_middle, bb_upper]):
+        return 0
+    close = float(df["close"].iloc[-1])
+    band_width = bb_upper - bb_lower
+    if band_width == 0:
+        return 0
+    position = (close - bb_lower) / band_width  # 0=at lower, 1=at upper
+    if position >= 0.8:        return 15   # Near upper band — overbought, mean reversion down
+    if position >= 0.65:       return 10
+    if 0.3 <= position <= 0.5: return 8    # Below middle — bearish momentum
     return 3
 
 
@@ -94,6 +128,21 @@ def _candlestick_score(patterns: List[Dict]) -> int:
     return min(score, 15)
 
 
+def _candlestick_score_short(patterns: List[Dict]) -> int:
+    if not patterns:
+        return 0
+    recent = [p for p in patterns[:6] if p.get("signal") == "bearish"]
+    if not recent:
+        return 0
+    score = 0
+    for p in recent[:2]:
+        if p["pattern"] in BEARISH_CANDLES:
+            score += 10
+        else:
+            score += 5
+    return min(score, 15)
+
+
 def _macd_score(indicators: Dict) -> int:
     macd = indicators.get("macd")
     signal = indicators.get("macd_signal")
@@ -103,6 +152,19 @@ def _macd_score(indicators: Dict) -> int:
     if macd > signal and (hist or 0) > 0:
         return 10   # Bullish crossover with positive histogram
     if macd > signal:
+        return 6
+    return 0
+
+
+def _macd_score_short(indicators: Dict) -> int:
+    macd = indicators.get("macd")
+    signal = indicators.get("macd_signal")
+    hist = indicators.get("macd_histogram")
+    if macd is None or signal is None:
+        return 0
+    if macd < signal and (hist or 0) < 0:
+        return 10   # Bearish crossover with negative histogram
+    if macd < signal:
         return 6
     return 0
 
@@ -118,6 +180,20 @@ def _sma_trend_score(df: pd.DataFrame, indicators: Dict) -> int:
     if sma200 and close > sma200: score += 4
     # Golden cross: SMA50 > SMA200
     if sma50 and sma200 and sma50 > sma200: score += 3
+    return min(score, 15)
+
+
+def _sma_trend_score_short(df: pd.DataFrame, indicators: Dict) -> int:
+    close = float(df["close"].iloc[-1])
+    sma20 = indicators.get("sma_20")
+    sma50 = indicators.get("sma_50")
+    sma200 = indicators.get("sma_200")
+    score = 0
+    if sma20 and close < sma20: score += 4
+    if sma50 and close < sma50: score += 4
+    if sma200 and close < sma200: score += 4
+    # Death cross: SMA50 < SMA200
+    if sma50 and sma200 and sma50 < sma200: score += 3
     return min(score, 15)
 
 
@@ -142,6 +218,47 @@ def _elliott_score(waves: List[Dict]) -> int:
     return 3
 
 
+def _elliott_score_short(waves: List[Dict]) -> int:
+    """
+    Mirrors _elliott_score() for bearish setups. Wave labeling itself is
+    direction-agnostic (elliott_wave_service._label_waves just numbers the
+    last 5/3 pivots) — so this checks the actual price direction of the
+    relevant legs before scoring, rather than trusting the wave number alone.
+    """
+    if len(waves) < 2:
+        return 0
+    last = waves[-1]
+    wave_num = last.get("wave_number", "")
+    wave_type = last.get("wave_type", "")
+    last_down = last.get("end_price", 0) < last.get("start_price", 0)
+
+    # Wave "2" just completed as an UP bounce after a down wave "1" —
+    # positions for wave 3 down, the strongest leg of a bearish impulse.
+    if wave_num == "2" and wave_type == "motive" and not last_down:
+        prev = waves[-2]
+        prev_down = prev.get("end_price", 0) < prev.get("start_price", 0)
+        if prev_down:
+            return 15
+
+    # Wave "4" just completed as a bounce after waves 1-3 down — positions
+    # for wave 5 down.
+    if wave_num == "4" and not last_down:
+        return 12
+
+    # Wave "C" just completed DOWN — corrective cycle finished bearish.
+    if wave_num == "C" and wave_type == "corrective" and last_down:
+        return 12
+
+    # Currently inside wave "3" and it's moving down — ride the strongest leg.
+    if wave_num == "3" and last_down:
+        return 10
+
+    # Any other clearly-down last leg gets a small credit.
+    if last_down:
+        return 3
+    return 0
+
+
 def _trendline_score(breakout_signal: Optional[Dict]) -> int:
     if not breakout_signal:
         return 0
@@ -151,6 +268,17 @@ def _trendline_score(breakout_signal: Optional[Dict]) -> int:
             return base
         return base - 5
     return 0   # Breakdown = bearish, no score for BUY screen
+
+
+def _trendline_score_short(breakout_signal: Optional[Dict]) -> int:
+    if not breakout_signal:
+        return 0
+    if breakout_signal.get("signal_type") == "BREAKDOWN":
+        base = 15
+        if breakout_signal.get("volume_confirmed"):
+            return base
+        return base - 5
+    return 0   # Breakout = bullish, no score for SHORT screen
 
 
 def _fundamental_score_contribution(fundamentals: Optional[Dict]) -> int:
@@ -293,6 +421,69 @@ def scan_symbol(
                 "rr_ratio": rr,
                 "trade_type": "INTRADAY" if rsi_val > 68 else "SWING",
                 "risk_reward": f"1:{rr}",
+            }
+
+    # ── Short-side composite score (same indicators/patterns/waves/breakout —
+    # no extra data fetch, just scored from the bearish angle) ───────────────
+    short_scores = {
+        "volume":       _volume_score(indicators),   # a volume spike matters either direction
+        "rsi":          _rsi_score_short(indicators),
+        "bollinger":    _bollinger_score_short(df_daily, indicators),
+        "candlestick":  _candlestick_score_short(patterns),
+        "macd":         _macd_score_short(indicators),
+        "sma_trend":    _sma_trend_score_short(df_daily, indicators),
+        "elliott_wave": _elliott_score_short(waves),
+        "trendline":    _trendline_score_short(breakout_signal),
+        "fundamental":  _fundamental_score_contribution(fundamentals),
+    }
+    short_total = sum(short_scores.values())
+    result["short_score_breakdown"] = short_scores
+    result["short_signal_score"] = short_total
+
+    if short_total >= 75:
+        short_signal = "STRONG SELL"
+    elif short_total >= 60:
+        short_signal = "SELL"
+    elif short_total >= 45:
+        short_signal = "WATCH"
+    else:
+        short_signal = "NEUTRAL"
+
+    result["short_signal"] = short_signal
+
+    # ── Suggested short-trade parameters ─────────────────────────────────────
+    # Shorting cash equity in India is intraday-only for retail (MIS, must be
+    # squared off same day — see trading_service.enter_trade's SHORT guard),
+    # unlike the LONG side which can be SWING or INTRADAY.
+    if short_signal in ("SELL", "STRONG SELL"):
+        # SL: above recent resistance or 3% above entry — whichever is tighter
+        sl_candidates = [current_price * 1.03]
+        if horizontal.get("resistance_levels"):
+            nearest_res = horizontal["resistance_levels"][0]["price"]
+            if nearest_res > current_price:
+                sl_candidates.append(nearest_res * 1.005)
+        short_stop_loss = round(min(sl_candidates), 2)
+
+        # Target: nearest support or 8% below entry — whichever is nearer/more achievable
+        target_candidates = [current_price * 0.92]
+        if horizontal.get("support_levels"):
+            nearest_sup = horizontal["support_levels"][0]["price"]
+            if nearest_sup < current_price:
+                target_candidates.append(nearest_sup * 1.002)
+        short_target = round(max(target_candidates), 2)
+
+        short_risk = short_stop_loss - current_price
+        short_reward = current_price - short_target
+        short_rr = round(short_reward / short_risk, 2) if short_risk > 0 else 0
+
+        if short_rr >= 1.5:
+            result["short_trade_suggestion"] = {
+                "entry": round(current_price, 2),
+                "stop_loss": short_stop_loss,
+                "target": short_target,
+                "rr_ratio": short_rr,
+                "trade_type": "INTRADAY",
+                "risk_reward": f"1:{short_rr}",
             }
 
     return result

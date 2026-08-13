@@ -56,6 +56,7 @@ class PendingSignal:
     est_investment: float = 0.0
     est_available_funds: float = 0.0
     est_is_hypothetical: bool = False
+    direction: str = "LONG"    # LONG | SHORT — SHORT is always INTRADAY (see trading_service.enter_trade)
 
 
 _pending: Dict[str, PendingSignal] = {}
@@ -97,8 +98,10 @@ def add_pending_signal(
     source: str = "INTRADAY",
     breakout_signal: Optional[str] = None,
     ttl_minutes: Optional[int] = None,
+    direction: str = "LONG",
 ) -> PendingSignal:
-    """Queue a signal for approval, replacing any still-pending one for the same symbol."""
+    """Queue a signal for approval, replacing any still-pending one for the same symbol
+    regardless of direction — never leave both a pending LONG and SHORT open on one symbol."""
     for sid, s in list(_pending.items()):
         if s.symbol == symbol and s.status == "PENDING":
             del _pending[sid]
@@ -119,6 +122,7 @@ def add_pending_signal(
         breakout_signal=breakout_signal,
         created_at=now.isoformat(),
         expires_at=(now + timedelta(minutes=ttl)).isoformat(),
+        direction=direction,
     )
 
     from services import trading_service
@@ -165,14 +169,20 @@ def approve_signal(signal_id: str) -> dict:
     # composite score's ceiling is ~130, not 100 (docs/TRADING_LOGIC.md §1).
     reason = sig.breakout_signal or f"{sig.signal} signal, score {sig.signal_score}/130"
 
+    # SHORT is always intraday/MIS — retail can't hold a cash-equity short
+    # overnight in India. trading_service.enter_trade() enforces this too;
+    # forced here as well so the request it receives is never ambiguous.
+    trade_type = "INTRADAY" if sig.direction == "SHORT" else sig.trade_type
+    product = "MIS" if (sig.direction == "SHORT" or trade_type == "INTRADAY") else "CNC"
+
     result = trading_service.enter_trade(
         symbol=sig.symbol,
-        direction="LONG",
+        direction=sig.direction,
         entry_price=sig.entry,
         stop_loss=sig.stop_loss,
         target=sig.target,
-        trade_type=sig.trade_type,
-        product="MIS" if sig.trade_type == "INTRADAY" else "CNC",
+        trade_type=trade_type,
+        product=product,
         signal_score=sig.signal_score,
         source=sig.source,
         reason=reason,

@@ -79,6 +79,7 @@ export interface PendingSignal {
   est_investment: number;
   est_available_funds: number;
   est_is_hypothetical: boolean;
+  direction: "LONG" | "SHORT";
 }
 
 export interface TradeSuggestion {

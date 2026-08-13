@@ -34,6 +34,33 @@ else         → NEUTRAL
 
 There is no ML model anywhere in this path — every number above is a deterministic rule. `services/claude_service.py` runs *after* this and only produces a narrative explanation; its output (`signal/confidence/target/stop_loss/risks`) is shown in the frontend's AI panel but never fed back into `screener_service` or `trading_service`. If Claude's API key is missing or the call errors, it silently falls back to a canned "HOLD/LOW confidence" object (`claude_service.py:164-167`) — a bad model id or auth failure will not surface as an error to you, just a bland fallback.
 
+## 1a. Short-selling — the bearish mirror (added 2026-08-13)
+
+`scan_symbol()` computes a **second, independent composite score in the same pass** — no extra broker/data calls — using 8 bearish-mirrored sub-scorers (`screener_service.py:68` onward, each named `_xxx_score_short`). Fundamentals are reused unchanged (`_fundamental_score_contribution`, still capped at a neutral 5 for intraday scans since `include_fundamentals=False` there); there's no separate "weak fundamentals" bearish scorer — intraday shorting is a technical, not fundamental, decision.
+
+| Factor | Function | What earns full marks |
+|---|---|---|
+| Volume spike | `_volume_score` (shared) | same as LONG — a spike matters either direction |
+| RSI zone | `_rsi_score_short` | RSI 35-55 (already trending down, not yet oversold) — RSI <30 scores 0 to avoid shorting into a bounce |
+| Bollinger position | `_bollinger_score_short` | price at/near **upper** band (overbought, mean-reversion down) |
+| Candlestick pattern | `_candlestick_score_short` | bearish patterns (Shooting Star, Evening Star, Three Black Crows, Dark Cloud Cover, bearish Engulfing) |
+| MACD | `_macd_score_short` | MACD < signal AND histogram negative |
+| SMA trend | `_sma_trend_score_short` | price below SMA20/50/200 + death cross (SMA50 < SMA200) |
+| Elliott Wave | `_elliott_score_short` (`screener_service.py:221`) | checks actual price direction of the relevant legs, not just the wave number (wave labeling itself is direction-agnostic — see `elliott_wave_service._label_waves`) — e.g. wave "2" must have actually moved price *up* after a down wave "1" before it counts as "wave 3 down starting" |
+| Trendline breakdown | `_trendline_score_short` | confirmed BREAKDOWN with volume; breakouts score 0 |
+
+Same `>=75/60/45` thresholds, producing `short_signal` (`STRONG SELL`/`SELL`/`WATCH`/`NEUTRAL`, `screener_service.py:444`) and `short_signal_score`, both alongside — not instead of — the existing LONG-side `signal`/`signal_score` on the same result dict.
+
+**Short trade suggestion** (only for SELL/STRONG SELL, mirrors §1's LONG logic exactly inverted): stop-loss = tightest of `entry*1.03` or just above nearest resistance; target = nearest of `entry*0.92` or just below nearest support; R:R ≥ 1.5 required. **`trade_type` is always `INTRADAY`** — unlike the LONG side, there's no SWING short: retail can't carry a cash-equity short overnight in India (no delivery to give on settlement).
+
+**Where it surfaces**: only `job_intraday_scan` (every 15 min, 09:30-15:15) queues SHORT signals — no premarket or swing short-selling, matching the INTRADAY-only constraint above. Alert gate mirrors the LONG side's STRONG BUY+breakout gate exactly: requires `short_signal == "STRONG SELL"` **and** a live BREAKDOWN trendline signal (`scheduler_service.py`'s `job_intraday_scan`), not just a high score alone.
+
+**Safety guard — never short a symbol you're already holding**: before generating SHORT candidates, the scheduler filters out any symbol currently in `trading_service.get_state().positions` (long *or* short). This is a UX-level filter (avoids wasting an alert on something that would just get rejected); the real enforcement is one layer down in `enter_trade()`'s pre-existing "Already in position for {symbol}" check, which is direction-agnostic and fires regardless of this filter. Practically: if a stock you're long in becomes a strong short candidate, nothing happens until that LONG position's own SL/target/EOD exit clears it — only on a *later* scan tick, once the symbol is no longer held, can a fresh SHORT signal be queued for it.
+
+**SHORT-specific entry guard** (`trading_service.py:409`): `enter_trade()` rejects outright — before any broker call — if `direction == "SHORT"` and either `trade_type != "INTRADAY"` or `product != "MIS"`. This is enforced twice: `signal_service.approve_signal()` already forces `trade_type="INTRADAY", product="MIS"` for any SHORT signal before calling `enter_trade()`, and `enter_trade()` itself re-checks and rejects rather than silently correcting — a caller passing SHORT+CNC is treated as a bug worth surfacing, not papered over.
+
+**Mechanically**: `Position.direction`/`ClosedTrade.direction` already supported `"SHORT"` before this — `enter_trade()` places a **SELL** order to open (`tx_type = "BUY" if direction == "LONG" else "SELL"`), `exit_trade()` places a **BUY** order to cover. Position sizing (`calculate_position_size`) is unchanged and already direction-agnostic (`risk_per_share = abs(entry - stop_loss)`). `exit_all_intraday()` (3:15 PM square-off) already filtered only by `trade_type == "INTRADAY"`, not direction — so it already correctly covers SHORT positions at EOD with no changes needed there.
+
 ## 2. Risk management — `services/trading_service.py` + `config.py`
 
 Four env-driven gates, all defined in `config.py:76-81`:

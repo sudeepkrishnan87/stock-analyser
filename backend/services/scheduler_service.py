@@ -4,11 +4,17 @@ Background scheduler: runs automated scans and trading jobs during market hours.
 Schedule (IST):
   09:00 AM  — Pre-market scan: top 5 picks, alert + queued for approval (Signals tab)
   09:15 AM  — Market open: first intraday scan
-  Every 15m  — Intraday scan: top 3 STRONG BUY+breakout, alert + queued for approval;
-              position monitor runs first (09:30 – 15:15)
-  03:15 PM  — Exit all intraday positions
+  Every 15m  — Intraday scan: top 3 STRONG BUY+breakout (LONG) and top 3 STRONG
+              SELL+breakdown (SHORT), each alert + queued for approval; position
+              monitor runs first (09:30 – 15:15). SHORT candidates never include
+              a symbol currently held (long or short) — that position's own
+              SL/target/EOD exit has to clear first (see trading_service.py).
+  03:15 PM  — Exit all intraday positions (LONG and SHORT — cash-equity shorts
+              can't be carried overnight for retail, so this is mandatory, not
+              just a convenience square-off)
   03:35 PM  — Daily P&L report email + WhatsApp
-  03:45 PM  — Swing scan: top 3 next-day setups, alert + queued for approval (~24h TTL)
+  03:45 PM  — Swing scan: top 3 next-day setups, alert + queued for approval (~24h
+              TTL) — LONG only, SHORT is intraday-only by construction
   Weekdays only (Mon–Fri), no scan on NSE holidays.
 
 No job in this file ever calls trading_service.enter_trade() — new entries always
@@ -202,6 +208,37 @@ def job_intraday_scan():
                     )
                     alert_service.alert_breakout(
                         r["symbol"], r["breakout_signal"],
+                        fundamentals=r.get("fundamentals"),
+                        action_links=signal_service.build_action_links(sig.id),
+                        quantity_estimate=_estimate_dict(sig),
+                    )
+
+        # ── Short-side candidates from the same scan pass — no extra broker
+        # calls, just scored from the bearish angle (see screener_service).
+        # Never a candidate for a symbol already held (long OR short) — that
+        # symbol's own SL/target/EOD exit has to clear it first; see
+        # trading_service.enter_trade's "Already in position" guard, which
+        # backs this up at the execution layer regardless of this filter.
+        held_symbols = set(trading_service.get_state().positions.keys())
+        short_candidates = sorted(
+            (r for r in results if r["symbol"] not in held_symbols),
+            key=lambda x: -x.get("short_signal_score", 0),
+        )
+        for r in short_candidates[:3]:
+            if r.get("short_signal") in ("SELL", "STRONG SELL") and r.get("short_trade_suggestion"):
+                breakout = r.get("breakout_signal")
+                if breakout and breakout.get("signal_type") == "BREAKDOWN" and r["short_signal"] == "STRONG SELL":
+                    sig = signal_service.add_pending_signal(
+                        symbol=r["symbol"],
+                        signal=r["short_signal"],
+                        signal_score=r.get("short_signal_score", 0),
+                        trade_suggestion=r["short_trade_suggestion"],
+                        source="INTRADAY",
+                        breakout_signal=_breakout_summary(breakout),
+                        direction="SHORT",
+                    )
+                    alert_service.alert_breakout(
+                        r["symbol"], breakout,
                         fundamentals=r.get("fundamentals"),
                         action_links=signal_service.build_action_links(sig.id),
                         quantity_estimate=_estimate_dict(sig),

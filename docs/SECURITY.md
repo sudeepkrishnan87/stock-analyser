@@ -59,6 +59,11 @@ Sole source of truth for open positions/P&L, plain JSON, no signature/checksum. 
 - **Why accepted rather than avoided**: the whole point is to approve/reject from a phone without the app open, which is incompatible with requiring the master API key on the link. The token is scoped narrowly enough that its exposure is a much smaller concession than exposing `API_SECRET_KEY` itself would be.
 - **Not covered**: email itself isn't end-to-end encrypted and Gmail/WhatsApp account compromise is outside this app's control — if that's ever a real concern, revisit whether this convenience is worth keeping.
 
+### 🟡 Accepted risk: short-selling has a fundamentally different loss profile than LONG (added 2026-08-13)
+A LONG position's max loss is bounded by capital deployed (price can't go below ₹0). A SHORT position's max loss is theoretically unbounded (price can rise indefinitely) — same 2%-risk sizing formula, same human-approval gate, but a stop-loss gap-up on a SHORT can lose meaningfully more than the sized "2% of capital" if price jumps past the SL before `monitor_positions()`'s next 15-min tick catches it (see docs/TRADING_LOGIC.md's polling-vs-GTT caveat, which applies more asymmetrically here).
+- **Why accepted rather than avoided**: explicit operator request (2026-08-13) — "explore the maturity of this application on intraday." Mitigated as far as is reasonably automatable: SHORT is hard-restricted to `INTRADAY`/`MIS` only (`trading_service.enter_trade()` rejects any other combination outright, `docs/TRADING_LOGIC.md` §1a), so nothing carries the gap-risk overnight; mandatory EOD square-off at 3:15 PM already covers SHORT (it filters by `trade_type`, not direction); and a symbol already held (either direction) is never offered as an opposite-direction candidate, so you can't end up net-short and net-long the same stock simultaneously.
+- **Not mitigated**: the polling-interval gap-risk itself (inherent to monitoring via 15-min ticks rather than a broker-side GTT stop order) is unchanged and, for SHORT specifically, has no loss ceiling the way LONG does.
+
 ## Checklist before merging any change to auth / secrets / order placement
 
 - [ ] Did you add a new public (unauthenticated) path? If yes, does it verify a signature/checksum from the calling party, not just trust the body?

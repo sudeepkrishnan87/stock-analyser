@@ -401,12 +401,22 @@ def enter_trade(
     this trade was taken — approve_signal() passes the originating signal's
     values; callers with no signal context (manual entry) leave the defaults.
     """
+    if direction == "SHORT" and (trade_type != "INTRADAY" or product != "MIS"):
+        # Retail can't carry a cash-equity short overnight in India — no
+        # delivery to give on settlement. Every SHORT must be INTRADAY/MIS.
+        # Rejected outright rather than silently corrected — a caller passing
+        # SHORT+CNC is a bug worth surfacing, not papering over.
+        return {"status": "REJECTED", "reason": "SHORT trades must be INTRADAY/MIS — cash-equity shorts can't be held overnight."}
+
     ok, block_reason = can_enter_trade()
     if not ok:
         logger.warning(f"Cannot enter trade for {symbol}: {block_reason}")
         return {"status": "REJECTED", "reason": block_reason}
 
     if symbol in _state.positions:
+        # Also the guard behind "never short a symbol already held" — a LONG
+        # position must exit (its own SL/target/EOD logic) before this symbol
+        # is eligible for a fresh SHORT, and vice versa.
         return {"status": "REJECTED", "reason": f"Already in position for {symbol}"}
 
     # Validate R:R
