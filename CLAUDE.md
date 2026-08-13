@@ -5,7 +5,7 @@ Personal, single-user algorithmic trading assistant for NSE/BSE via Zerodha Kite
 This file orients Claude Code (or any engineer) fast. Deep dives live in `docs/`:
 
 - **[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)** — Mermaid diagrams of the whole system: component overview, request auth lifecycle, stock-research flow, the trading decision + human-approval loop, and the deploy pipeline. Start here if you're new to the codebase.
-- **[docs/TRADING_LOGIC.md](docs/TRADING_LOGIC.md)** — how a buy/sell decision is actually made: the 9-factor scoring engine, risk gates, position sizing, scheduler timeline, order lifecycle. Read this before touching `services/screener_service.py` or `services/trading_service.py`.
+- **[docs/TRADING_LOGIC.md](docs/TRADING_LOGIC.md)** — how a buy/sell decision is actually made: the composite scoring engine (LONG and its bearish SHORT mirror), risk gates, position sizing, partial profit-taking, scheduler timeline, order lifecycle. Read this before touching `services/screener_service.py` or `services/trading_service.py`.
 - **[docs/SECURITY.md](docs/SECURITY.md)** — threat model, current findings, what's fixed vs. accepted risk, and the checklist to run before any change that touches auth, secrets, or order placement.
 - **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)** — the actual, current AWS setup: EC2 access, normal vs. manual deploy, pushing secret changes to SSM, verifying a deploy, and a troubleshooting table for the failure modes already hit in practice (stopped instance, region mismatch between EC2 and SSM, stale browser key).
 
@@ -13,7 +13,7 @@ This file orients Claude Code (or any engineer) fast. Deep dives live in `docs/`
 
 - Not multi-user. One `X-API-Key` gates everything.
 - Not backed by a database. All state is one JSON file (`backend/data/trades.json`) plus in-memory process state.
-- Not paper-trading by default. `services/trading_service.enter_trade()` places **real market orders** when called. As of 2026-07-16, the scheduler never calls it automatically — the 15-minute intraday job only alerts on STRONG BUY signals; entering a trade always requires an explicit, human-initiated call to the trading API. `dry_run=True` / `POST /api/trading/dry-run` is the only simulation path, and it's opt-in per call, not a global switch.
+- Not paper-trading by default. `services/trading_service.enter_trade()` places **real market orders** when called (LONG or SHORT — intraday short-selling shipped 2026-08-13, always INTRADAY/MIS, see `docs/TRADING_LOGIC.md` §1a). The scheduler never calls it automatically — the 15-minute intraday job only alerts on STRONG BUY and STRONG SELL signals; entering a trade always requires an explicit, human-initiated approval (Signals tab, one-click email/WhatsApp link, or the Research tab's direct Approve action). `dry_run=True` / `POST /api/trading/dry-run` is the only simulation path, and it's opt-in per call, not a global switch.
 - The Anthropic/Claude integration (`services/claude_service.py`) is narrative-only — it explains a decision already made by deterministic Python. It never decides a trade.
 
 ## Repo map
@@ -28,7 +28,7 @@ backend/
     fyers.py                 # Fyers v3 (ACTIVE_BROKER=fyers, less battle-tested)
   routers/                  # HTTP surface — one file per feature area (auth, stocks, scanner, trading, alerts, fii_dii)
   services/
-    screener_service.py     # THE signal engine — composite 0-100 score, see docs/TRADING_LOGIC.md
+    screener_service.py     # THE signal engine — composite LONG + SHORT scores, see docs/TRADING_LOGIC.md
     trading_service.py       # Risk gates, position sizing, order entry/exit, trailing stop
     technical_service.py     # RSI/MACD/Bollinger/SMA via `ta`
     candlestick_service.py   # Rule-based candlestick pattern detection
@@ -42,10 +42,11 @@ backend/
     nse_service.py            # FII/DII scraping + quarterly financials
   data/trades.json           # sole persisted trading state (gitignored)
 frontend/
-  src/App.tsx                # single-page orchestrator: LoginGate → analysis panels
+  src/App.tsx                # single-page orchestrator: LoginGate → Research / Signals / Trade Book tabs
   src/api/client.ts           # axios + X-API-Key interceptor (key stored in localStorage)
-  src/components/             # chart/indicator/AI-narrative panels (read-only research view;
-                               # scanner/trading endpoints exist in client.ts but have no page yet)
+  src/components/             # SignalsPanel (approve/reject queue), TradeBook (reasoning/history),
+                               # TradeSetupCard (Research tab — direct-approve any symbol, not just
+                               # read-only anymore), chart/indicator/AI-narrative panels
 deploy/                      # EC2 bootstrap, systemd unit, AWS SSM secret upload script
 nginx/                       # reverse proxy: TLS, HSTS, rate limiting (5/min auth, 30/min api)
 .github/workflows/deploy.yml # push-to-main → SSH → git pull → docker compose build/up (live, currently authoritative)
