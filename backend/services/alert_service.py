@@ -256,6 +256,32 @@ def alert_trade_executed(symbol: str, action: str, quantity: int, price: float, 
     return send_alert(f"{emoji} {action}: {symbol} @ ₹{price:.2f}", body)
 
 
+def alert_exit_failed(symbol: str, reason: str, ltp: float, entry_price: float, error: str) -> Dict:
+    """
+    Fired every time a broker exit order is rejected — e.g. Zerodha's CDSL
+    delivery-authorisation requirement (added 2026-08-19, after NTPC sat
+    unprotected below its stop-loss for 5 trading days with the scheduler
+    silently logging "Position exited" on every failed attempt). Unlike
+    alert_stop_loss_hit/alert_target_hit, this fires on every single retry
+    while the position remains stuck — noisy by design, since silence is
+    what let the 5-day gap go unnoticed in the first place.
+    """
+    body = (
+        f"⚠️ EXIT FAILED — {symbol} still OPEN\n"
+        f"{'─' * 40}\n"
+        f"Exit reason  : {reason}\n"
+        f"Entry        : ₹{entry_price:.2f}\n"
+        f"Current price: ₹{ltp:.2f}\n"
+        f"Broker error : {error}\n"
+        f"\nThe position was NOT closed — it remains open and unprotected. "
+        f"This will keep retrying every 15 minutes; if it keeps failing, "
+        f"check the broker error above (a CDSL/DDPI authorisation issue "
+        f"needs a one-time fix on your Zerodha account — see docs/TRADING_LOGIC.md) "
+        f"or exit manually from the Zerodha app."
+    )
+    return send_alert(f"⚠️ EXIT FAILED: {symbol} still open ({reason})", body)
+
+
 def alert_stop_loss_hit(symbol: str, entry_price: float, sl_price: float, loss_pct: float) -> Dict:
     body = (
         f"🛑 STOP LOSS HIT — {symbol}\n"

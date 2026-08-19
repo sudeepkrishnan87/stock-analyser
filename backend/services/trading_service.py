@@ -540,6 +540,10 @@ def exit_trade(symbol: str, exit_price: float, reason: str = "MANUAL") -> Option
         )
     except Exception as e:
         logger.error(f"Exit order failed for {symbol}: {e}")
+        # Silent failure here is exactly what let NTPC sit below its stop-loss
+        # for 5 trading days unnoticed (2026-08-19 incident) — this alert
+        # fires on every retry until the exit actually goes through.
+        alert_service.alert_exit_failed(symbol, reason, exit_price, pos.entry_price, str(e))
         return {"status": "ERROR", "reason": str(e)}
 
     pnl = pos.current_pnl(exit_price)
@@ -617,6 +621,7 @@ def _partial_exit_target(symbol: str, exit_price: float) -> Optional[Dict]:
         )
     except Exception as e:
         logger.error(f"Partial exit order failed for {symbol}: {e}")
+        alert_service.alert_exit_failed(symbol, "TARGET_HIT (partial)", exit_price, pos.entry_price, str(e))
         return {"status": "ERROR", "reason": str(e)}
 
     per_share = (exit_price - pos.entry_price) if pos.direction == "LONG" else (pos.entry_price - exit_price)

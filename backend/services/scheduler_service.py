@@ -178,10 +178,25 @@ def job_intraday_scan():
     try:
         monitor_actions = trading_service.monitor_positions()
         for action in monitor_actions:
-            if action.get("action") == "EXIT":
-                logger.info(
-                    f"[SCHEDULER] Position exited: {action['symbol']} — {action.get('reason')}"
-                )
+            # Bug fixed 2026-08-19: this used to log "Position exited" purely
+            # off action == EXIT, without checking whether the broker order
+            # actually succeeded — NTPC sat below its stop-loss for 5 trading
+            # days, failing every retry, while this line kept claiming it had
+            # exited. Now checks the actual result status; a failure is loud
+            # (ERROR-level log + alert_service.alert_exit_failed, called from
+            # inside exit_trade/_partial_exit_target itself) instead of silent.
+            if action.get("action") in ("EXIT", "PARTIAL_EXIT"):
+                status = (action.get("result") or {}).get("status")
+                if status in ("CLOSED", "PARTIAL_CLOSED"):
+                    logger.info(
+                        f"[SCHEDULER] Position {'partially ' if status == 'PARTIAL_CLOSED' else ''}"
+                        f"exited: {action['symbol']} — {action.get('reason')}"
+                    )
+                else:
+                    logger.error(
+                        f"[SCHEDULER] Exit FAILED for {action['symbol']} ({action.get('reason')}) — "
+                        f"still open: {(action.get('result') or {}).get('reason')}"
+                    )
     except Exception as e:
         logger.error(f"[SCHEDULER] Position monitor error: {e}")
 
