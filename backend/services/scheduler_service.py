@@ -173,6 +173,7 @@ def job_intraday_scan():
         return
 
     from services import screener_service, trading_service, alert_service, signal_service
+    from agents.orchestrator import orchestrator
 
     # ── Monitor existing positions first ─────────────────────────────────────
     try:
@@ -209,6 +210,15 @@ def job_intraday_scan():
             days_back=30,
         )
         for r in results[:3]:   # alert on top 3
+            # Phase 0 shadow mode (agents/ architecture, see docs/enrichment.md +
+            # the agent-architecture plan): every candidate already being considered
+            # runs through the orchestrator purely to prove the tracing/plumbing works
+            # end-to-end. No risk agents are registered yet, so this can never change
+            # the outcome below — it's read-only observation, not a real gate yet.
+            try:
+                orchestrator.evaluate_candidate(r["symbol"], r, shared={})
+            except Exception as e:
+                logger.error(f"[SCHEDULER] Orchestrator shadow-mode error for {r['symbol']}: {e}")
             if r.get("signal") in ("BUY", "STRONG BUY") and r.get("trade_suggestion"):
                 # Alert + queue for approval — no trade is ever placed without explicit
                 # human approval. See docs/SECURITY.md "no global paper-trading switch" finding.
@@ -240,6 +250,11 @@ def job_intraday_scan():
             key=lambda x: -x.get("short_signal_score", 0),
         )
         for r in short_candidates[:3]:
+            # Same Phase 0 shadow-mode observation as the LONG loop above.
+            try:
+                orchestrator.evaluate_candidate(r["symbol"], r, shared={})
+            except Exception as e:
+                logger.error(f"[SCHEDULER] Orchestrator shadow-mode error for {r['symbol']}: {e}")
             if r.get("short_signal") in ("SELL", "STRONG SELL") and r.get("short_trade_suggestion"):
                 breakout = r.get("breakout_signal")
                 if breakout and breakout.get("signal_type") == "BREAKDOWN" and r["short_signal"] == "STRONG SELL":

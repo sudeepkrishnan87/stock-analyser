@@ -8,6 +8,8 @@ This file orients Claude Code (or any engineer) fast. Deep dives live in `docs/`
 - **[docs/TRADING_LOGIC.md](docs/TRADING_LOGIC.md)** — how a buy/sell decision is actually made: the composite scoring engine (LONG and its bearish SHORT mirror), risk gates, position sizing, partial profit-taking, scheduler timeline, order lifecycle. Read this before touching `services/screener_service.py` or `services/trading_service.py`.
 - **[docs/SECURITY.md](docs/SECURITY.md)** — threat model, current findings, what's fixed vs. accepted risk, and the checklist to run before any change that touches auth, secrets, or order placement.
 - **[docs/DEPLOYMENT.md](docs/DEPLOYMENT.md)** — the actual, current AWS setup: EC2 access, normal vs. manual deploy, pushing secret changes to SSM, verifying a deploy, and a troubleshooting table for the failure modes already hit in practice (stopped instance, region mismatch between EC2 and SSM, stale browser key).
+- **[docs/AGENTS.md](docs/AGENTS.md)** — the deterministic agent/orchestrator framework in `backend/agents/` (Phase 0 as of 2026-09-20: shadow-mode scaffolding, zero behavior change). Read this before adding a new agent or touching `agents/orchestrator.py`.
+- **[docs/enrichment.md](docs/enrichment.md)** — the trading-strategy enrichment roadmap (sector concentration, daily-drawdown gate, market regime, ADX, etc.) that `backend/agents/` exists to eventually carry, one enrichment per agent.
 
 ## What this is NOT
 
@@ -26,6 +28,11 @@ backend/
     base.py                # BaseBroker ABC — the contract every broker must implement
     zerodha.py              # Kite Connect v5 (default, ACTIVE_BROKER=zerodha)
     fyers.py                 # Fyers v3 (ACTIVE_BROKER=fyers, less battle-tested)
+  agents/                   # Deterministic agent/orchestrator framework — see docs/AGENTS.md.
+    base.py                 #   BaseAgent ABC, AgentContext, AgentResult, Verdict — every agent's contract
+    tracing.py               #   run_traced() — the "logger agent," grep-friendly structured log lines
+    orchestrator.py           #   Orchestrator singleton — parallel fan-out (ThreadPoolExecutor) + decision policy
+    scoring_agent.py           #   ScoringAgent — wraps screener_service.scan_symbol() unchanged
   routers/                  # HTTP surface — one file per feature area (auth, stocks, scanner, trading, alerts, fii_dii)
   services/
     screener_service.py     # THE signal engine — composite LONG + SHORT scores, see docs/TRADING_LOGIC.md

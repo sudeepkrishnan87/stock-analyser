@@ -47,6 +47,9 @@ async def lifespan(app: FastAPI):
     from services.scheduler_service import start_scheduler, stop_scheduler
     start_scheduler()
 
+    from agents.orchestrator import start_orchestrator, stop_orchestrator
+    start_orchestrator()
+
     # Auto-login on startup so a backend restart doesn't leave us unauthenticated
     # until the next 8:30 AM scheduler run.
     import asyncio
@@ -63,6 +66,7 @@ async def lifespan(app: FastAPI):
 
     yield
     stop_scheduler()
+    stop_orchestrator()
     logger.info("StockBot API shut down.")
 
 
