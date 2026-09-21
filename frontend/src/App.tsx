@@ -12,6 +12,7 @@ import TechnicalIndicatorsPanel from "./components/TechnicalIndicatorsPanel";
 import CandlestickPatterns from "./components/CandlestickPatterns";
 import QuarterlyCard from "./components/QuarterlyCard";
 import SignalsPanel from "./components/SignalsPanel";
+import RecentDecisions from "./components/RecentDecisions";
 import TradeBook from "./components/TradeBook";
 import TradeSetupCard from "./components/TradeSetupCard";
 import { useFaviconBadge } from "./hooks/useFaviconBadge";
@@ -37,12 +38,16 @@ export default function App() {
   // ── Tabs + pending signal approvals ─────────────────────────────────────────
   const [activeTab, setActiveTab] = useState<"research" | "signals" | "tradebook">("research");
   const [pendingSignals, setPendingSignals] = useState<PendingSignal[]>([]);
+  // Bumped every time pending signals refresh (including right after an
+  // approve/reject action) so RecentDecisions re-fetches without a manual click.
+  const [recentDecisionsTick, setRecentDecisionsTick] = useState(0);
 
   const refreshPendingSignals = useCallback(() => {
     if (!hasApiKey()) return;
     getPendingSignals()
       .then((data) => setPendingSignals(data.signals))
       .catch(() => {});
+    setRecentDecisionsTick((n) => n + 1);
   }, []);
 
   useFaviconBadge(pendingSignals.length, BASE_TITLE);
@@ -183,6 +188,7 @@ export default function App() {
             </p>
           </div>
           <SignalsPanel signals={pendingSignals} onResolved={refreshPendingSignals} />
+          <RecentDecisions refreshTrigger={recentDecisionsTick} />
         </main>
       )}
 

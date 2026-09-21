@@ -127,6 +127,11 @@ export async function getPendingSignals(): Promise<{ count: number; signals: Pen
   return data;
 }
 
+export async function getRecentSignals(limit = 20): Promise<{ count: number; signals: PendingSignal[] }> {
+  const { data } = await api.get(`/signals/recent?limit=${limit}`);
+  return data;
+}
+
 export async function approveSignal(id: string) {
   const { data } = await api.post(`/signals/${id}/approve`);
   return data;

@@ -3,6 +3,9 @@ Pending trade signal endpoints — the human approval gate for scheduler-detecte
 STRONG BUY + breakout setups. See docs/SECURITY.md.
 
   GET  /api/signals/pending                       — list signals awaiting approval
+  GET  /api/signals/recent                        — recently approved/rejected/expired signals,
+                                                     with the rejection reason (and sizing math,
+                                                     if that's why) still visible after the fact
   POST /api/signals/{id}/approve                  — approve: places the real order via trading_service
   POST /api/signals/{id}/reject                   — reject: discards the signal, no order placed
   GET  /api/signals/email-action/{id}/{action}    — one-click approve/reject from an
@@ -25,6 +28,13 @@ _ERROR_STATUS_CODES = {"NOT_FOUND": 404, "ALREADY_RESOLVED": 409}
 @router.get("/pending")
 def pending_signals():
     signals = signal_service.list_pending_signals()
+    return {"count": len(signals), "signals": signals}
+
+
+@router.get("/recent")
+def recent_signals(limit: int = Query(default=20, ge=1, le=100)):
+    """Already-resolved signals (approved/rejected/expired), most recent first."""
+    signals = signal_service.list_recent_resolved(limit=limit)
     return {"count": len(signals), "signals": signals}
 
 

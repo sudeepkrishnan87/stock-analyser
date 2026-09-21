@@ -255,6 +255,58 @@ def _effective_capital(broker: Optional[BaseBroker]) -> float:
         return _state.capital
 
 
+def _position_size_breakdown(entry: float, stop_loss: float, broker: Optional[BaseBroker] = None) -> Dict:
+    """
+    Same math as calculate_position_size(), but keeps every intermediate number
+    instead of collapsing straight to a share count — so a rejection can show its
+    own arithmetic (added 2026-09-21, after a "why was this rejected" question
+    that took digging through server logs to answer). calculate_position_size()
+    below is now a thin wrapper that returns just `final_shares`, so every
+    existing caller is unaffected.
+    """
+    capital = _state.capital
+    effective_capital = _effective_capital(broker)
+    deployed_capital = _state.deployed_capital
+
+    risk_amount = effective_capital * (settings.MAX_RISK_PER_TRADE_PCT / 100)
+    risk_per_share = abs(entry - stop_loss)
+    shares_from_risk = int(risk_amount / risk_per_share) if risk_per_share >= 0.01 else 0
+
+    max_deployable = effective_capital * (settings.MAX_PORTFOLIO_EXPOSURE_PCT / 100) - deployed_capital
+    shares_from_exposure = max(0, int(max_deployable / entry)) if entry > 0 else 0
+
+    available_funds = None
+    shares_from_funds = None
+    if broker is not None:
+        try:
+            available_funds = broker.get_available_funds()
+            shares_from_funds = int(available_funds / entry) if entry > 0 else 0
+        except Exception as e:
+            logger.warning(f"Could not fetch available funds — sizing off configured capital only: {e}")
+
+    candidates = [shares_from_risk, shares_from_exposure]
+    if shares_from_funds is not None:
+        candidates.append(shares_from_funds)
+    final_shares = max(0, min(candidates)) if risk_per_share >= 0.01 else 0
+
+    return {
+        "entry_price": round(entry, 2),
+        "stop_loss": round(stop_loss, 2),
+        "capital": round(capital, 2),
+        "effective_capital": round(effective_capital, 2),
+        "deployed_capital": round(deployed_capital, 2),
+        "available_funds": round(available_funds, 2) if available_funds is not None else None,
+        "max_exposure_pct": settings.MAX_PORTFOLIO_EXPOSURE_PCT,
+        "max_deployable": round(max_deployable, 2),
+        "risk_per_trade_pct": settings.MAX_RISK_PER_TRADE_PCT,
+        "risk_amount": round(risk_amount, 2),
+        "shares_from_risk": shares_from_risk,
+        "shares_from_exposure": shares_from_exposure,
+        "shares_from_funds": shares_from_funds,
+        "final_shares": final_shares,
+    }
+
+
 def calculate_position_size(entry: float, stop_loss: float, broker: Optional[BaseBroker] = None) -> int:
     """
     Risk-based position sizing.
@@ -266,27 +318,7 @@ def calculate_position_size(entry: float, stop_loss: float, broker: Optional[Bas
     (transient API issue) falls back to the configured-capital-only cap
     rather than blocking the trade.
     """
-    capital = _effective_capital(broker)
-    risk_amount = capital * (settings.MAX_RISK_PER_TRADE_PCT / 100)
-    risk_per_share = abs(entry - stop_loss)
-    if risk_per_share < 0.01:
-        return 0
-    shares = int(risk_amount / risk_per_share)
-
-    # Cap so total deployment stays within the configured limit
-    max_deployable = capital * (settings.MAX_PORTFOLIO_EXPOSURE_PCT / 100) - _state.deployed_capital
-    if max_deployable <= 0:
-        return 0
-    shares = min(shares, int(max_deployable / entry))
-
-    if broker is not None:
-        try:
-            available_funds = broker.get_available_funds()
-            shares = min(shares, int(available_funds / entry))
-        except Exception as e:
-            logger.warning(f"Could not fetch available funds — sizing off configured capital only: {e}")
-
-    return max(0, shares)
+    return _position_size_breakdown(entry, stop_loss, broker)["final_shares"]
 
 
 # Used only when real broker funds can't be determined (not authenticated, API
@@ -427,9 +459,14 @@ def enter_trade(
         return {"status": "REJECTED", "reason": f"R:R ratio {rr:.1f} below minimum 1.5"}
 
     broker = _get_broker()
-    quantity = calculate_position_size(entry_price, stop_loss, broker=broker)
+    sizing = _position_size_breakdown(entry_price, stop_loss, broker=broker)
+    quantity = sizing["final_shares"]
     if quantity == 0:
-        return {"status": "REJECTED", "reason": "Position size is 0. Check capital, exposure, or available funds."}
+        return {
+            "status": "REJECTED",
+            "reason": "Position size is 0. Check capital, exposure, or available funds.",
+            "sizing_breakdown": sizing,
+        }
 
     tx_type = "BUY" if direction == "LONG" else "SELL"
 

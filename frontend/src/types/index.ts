@@ -80,6 +80,36 @@ export interface PendingSignal {
   est_available_funds: number;
   est_is_hypothetical: boolean;
   direction: "LONG" | "SHORT";
+  resolution?: SignalResolution | null;
+}
+
+// Mirrors trading_service._position_size_breakdown() exactly — every intermediate
+// number behind a "Position size is 0" rejection, so the Signals tab can show the
+// actual arithmetic instead of just the one-line reason.
+export interface SizingBreakdown {
+  entry_price: number;
+  stop_loss: number;
+  capital: number;
+  effective_capital: number;
+  deployed_capital: number;
+  available_funds: number | null;
+  max_exposure_pct: number;
+  max_deployable: number;
+  risk_per_trade_pct: number;
+  risk_amount: number;
+  shares_from_risk: number;
+  shares_from_exposure: number;
+  shares_from_funds: number | null;
+  final_shares: number;
+}
+
+export interface SignalResolution {
+  status: string;
+  reason?: string;
+  sizing_breakdown?: SizingBreakdown;
+  quantity?: number;
+  entry_price?: number;
+  symbol?: string;
 }
 
 export interface TradeSuggestion {

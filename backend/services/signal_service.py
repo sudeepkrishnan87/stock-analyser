@@ -154,6 +154,22 @@ def count_pending() -> int:
     return sum(1 for s in _pending.values() if s.status == "PENDING")
 
 
+def list_recent_resolved(limit: int = 20) -> List[dict]:
+    """
+    Signals that have already been approved/rejected/expired, most recent first —
+    added 2026-09-21 so a rejection reason (and the sizing math behind it, see
+    trading_service._position_size_breakdown) stays visible after the fact instead
+    of only appearing once, transiently, on the approval click itself. Reuses the
+    same in-memory _pending dict rather than a new store — resolved signals already
+    sit there (see module docstring: in-memory only, doesn't survive a restart, and
+    that's fine here for the same reason it's fine for pending ones).
+    """
+    _expire_stale()
+    resolved = [s for s in _pending.values() if s.status != "PENDING"]
+    resolved.sort(key=lambda s: s.created_at, reverse=True)
+    return [asdict(s) for s in resolved[:limit]]
+
+
 def approve_signal(signal_id: str) -> dict:
     from services import trading_service
 
