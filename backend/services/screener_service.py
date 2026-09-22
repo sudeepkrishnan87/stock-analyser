@@ -21,6 +21,7 @@ import logging
 from typing import List, Dict, Optional, Any
 
 import pandas as pd
+import ta
 
 from services import (
     technical_service,
@@ -42,6 +43,18 @@ BEARISH_CANDLES = {
     "Shooting Star", "Evening Star", "Gravestone Doji",
     "Three Black Crows", "Dark Cloud Cover", "Engulfing",
 }
+
+# Intraday-specific SHORT stop/target sizing — replaces a flat 3%/8% that used
+# to apply regardless of trade_type, even though SHORT is always same-day
+# (trading_service.enter_trade's INTRADAY/MIS guard). An 8% move in a session
+# is rare for a liquid large/mid-cap NSE name; these scale to each stock's own
+# recent volatility (ATR) instead of assuming uniform behavior. Only used in
+# the short_trade_suggestion block below — the LONG formula above it is
+# untouched.
+SHORT_SL_ATR_MULT = 1.0        # stop = entry + 1.0x ATR(14)
+SHORT_TARGET_ATR_MULT = 1.8    # target = entry - 1.8x ATR(14) (nominal R:R ~1.8, safely above the 1.5 gate)
+SHORT_SL_MIN_PCT = 0.008       # never tighter than 0.8% — avoids noise-triggered stops on very low-ATR names
+SHORT_TARGET_MAX_PCT = 0.05    # never further than 5% — realistic for a single session (was 8%)
 
 
 def _volume_score(indicators: Dict) -> int:
@@ -65,16 +78,125 @@ def _rsi_score(indicators: Dict) -> int:
     return 0   # <35 (too weak) or >70 (overbought)
 
 
-def _rsi_score_short(indicators: Dict) -> int:
+def _compute_short_bias_metrics(df: pd.DataFrame) -> Dict:
+    """
+    Short-specific metrics, computed once per scan and fed to the short-side
+    scorers below. Deliberately NOT added to technical_service.compute_indicators()
+    (shared by LONG and SHORT) — this function and everything that reads it is
+    only ever called from scan_symbol()'s short-scoring block, so none of it
+    touches LONG scoring at all. See docs/TRADING_LOGIC.md §1a.
+
+    Every sub-computation is wrapped individually so one failing metric (e.g.
+    too little data for ATR) never blocks the others.
+    """
+    metrics: Dict = {}
+
+    # ATR(14) — replaces the old flat 3%/8% SL/target with per-stock volatility
+    # sizing (see the short_trade_suggestion block further down).
+    try:
+        atr_series = ta.volatility.AverageTrueRange(
+            high=df["high"], low=df["low"], close=df["close"], window=14
+        ).average_true_range().dropna()
+        if not atr_series.empty:
+            metrics["atr"] = float(atr_series.iloc[-1])
+    except Exception:
+        pass
+
+    # Down-volume ratio: what fraction of the last 5 candles' volume happened
+    # on red (close < open) candles — confirms the volume is actually
+    # distribution/selling, not just generic activity that happened to spike.
+    try:
+        recent = df.tail(5)
+        total_vol = float(recent["volume"].sum())
+        if total_vol > 0:
+            down_vol = float(recent.loc[recent["close"] < recent["open"], "volume"].sum())
+            metrics["down_volume_ratio"] = down_vol / total_vol
+    except Exception:
+        pass
+
+    # RSI rollover: was RSI >= 65 at any point in the last 10 bars, and has it
+    # since dropped to <= 55? A trajectory check (rejected from overbought,
+    # now breaking down), not just today's static level.
+    try:
+        rsi_series = ta.momentum.RSIIndicator(close=df["close"], window=14).rsi().dropna()
+        if len(rsi_series) >= 10:
+            recent_rsi = rsi_series.tail(10)
+            metrics["rsi_rolled_over"] = bool(recent_rsi.max() >= 65 and recent_rsi.iloc[-1] <= 55)
+    except Exception:
+        pass
+
+    # Today's session VWAP (resets each trading day) — the standard intraday
+    # reference level real traders use, unlike Elliott Wave which is a
+    # swing/position tool (see _elliott_score_short's reduced weight below).
+    try:
+        last_date = df.index[-1].date()
+        today = df[df.index.date == last_date]
+        if not today.empty:
+            typical_price = (today["high"] + today["low"] + today["close"]) / 3
+            cum_vol = today["volume"].cumsum()
+            cum_pv = (typical_price * today["volume"]).cumsum()
+            cum_vol_safe = cum_vol.replace(0, pd.NA)
+            vwap_series = cum_pv / cum_vol_safe
+            vwap = vwap_series.dropna()
+            if not vwap.empty:
+                vwap_last = float(vwap.iloc[-1])
+                metrics["vwap"] = vwap_last
+                metrics["below_vwap"] = float(df["close"].iloc[-1]) < vwap_last
+    except Exception:
+        pass
+
+    return metrics
+
+
+def _volume_score_short(indicators: Dict, short_bias: Dict) -> int:
+    """
+    Replaces the shared _volume_score for the short composite. A volume spike
+    alone (what _volume_score checks) doesn't confirm selling — this requires
+    the spike to also skew toward down candles (short_bias["down_volume_ratio"]).
+    Falls back to the plain spike check if direction can't be confirmed, so a
+    metrics failure never zeroes out the whole factor.
+    """
+    vr = indicators.get("volume_ratio", 0) or 0
+    down_ratio = short_bias.get("down_volume_ratio")
+    if down_ratio is None:
+        return _volume_score(indicators)
+    if vr >= 2.0 and down_ratio >= 0.65: return 15
+    if vr >= 1.5 and down_ratio >= 0.6:  return 10
+    if vr >= 1.2 and down_ratio >= 0.55: return 5
+    return 0
+
+
+def _rsi_score_short(indicators: Dict, short_bias: Dict) -> int:
+    """
+    A stock rejected from RSI 75 and a stock that just bounced off RSI 20 can
+    both read RSI 45 "right now" — the old level-only check scored them the
+    same. rsi_rolled_over (see _compute_short_bias_metrics) checks the actual
+    trajectory instead: rejected from overbought, now breaking down is a real
+    reversal setup and scores highest; the old static-level check remains as a
+    smaller fallback signal, not the primary one.
+    """
+    if short_bias.get("rsi_rolled_over"):
+        return 15
     rsi = indicators.get("rsi")
     if rsi is None:
         return 0
     # Sweet spot: 35-55 (already trending down, not yet oversold-bounce risk)
-    if 35 <= rsi <= 55: return 15
-    if 55 < rsi <= 60:  return 10
-    if 30 <= rsi < 35:  return 8
-    if 60 < rsi <= 70:  return 5
+    if 35 <= rsi <= 55: return 8
+    if 55 < rsi <= 60:  return 5
+    if 30 <= rsi < 35:  return 4
     return 0   # <30 (oversold, bounce risk) or >70 (still strong bullish momentum)
+
+
+def _vwap_score_short(short_bias: Dict) -> int:
+    """
+    Below today's session VWAP -> meaningful bearish-positioning credit; at or
+    above -> 0. Deliberately binary — no backtested data exists yet to justify
+    finer granularity (same principle as the rest of this scoring engine: don't
+    tune what you can't measure).
+    """
+    if short_bias.get("below_vwap"):
+        return 12
+    return 0
 
 
 def _bollinger_score(df: pd.DataFrame, indicators: Dict) -> int:
@@ -224,6 +346,13 @@ def _elliott_score_short(waves: List[Dict]) -> int:
     direction-agnostic (elliott_wave_service._label_waves just numbers the
     last 5/3 pivots) — so this checks the actual price direction of the
     relevant legs before scoring, rather than trusting the wave number alone.
+
+    Point values deliberately scaled down from the original mirror (15/12/12/10/3
+    -> 8/6/6/5/2): Elliott Wave is a swing/position technique reading multi-day
+    wave structure, and applying it to 15-minute intraday bars (the only
+    timeframe short signals are ever scored on) is a timeframe mismatch — kept
+    as a secondary contributing factor, not a primary one, freeing composite
+    weight for the intraday-native VWAP factor instead (_vwap_score_short).
     """
     if len(waves) < 2:
         return 0
@@ -238,24 +367,24 @@ def _elliott_score_short(waves: List[Dict]) -> int:
         prev = waves[-2]
         prev_down = prev.get("end_price", 0) < prev.get("start_price", 0)
         if prev_down:
-            return 15
+            return 8
 
     # Wave "4" just completed as a bounce after waves 1-3 down — positions
     # for wave 5 down.
     if wave_num == "4" and not last_down:
-        return 12
+        return 6
 
     # Wave "C" just completed DOWN — corrective cycle finished bearish.
     if wave_num == "C" and wave_type == "corrective" and last_down:
-        return 12
+        return 6
 
     # Currently inside wave "3" and it's moving down — ride the strongest leg.
     if wave_num == "3" and last_down:
-        return 10
+        return 5
 
     # Any other clearly-down last leg gets a small credit.
     if last_down:
-        return 3
+        return 2
     return 0
 
 
@@ -424,16 +553,23 @@ def scan_symbol(
             }
 
     # ── Short-side composite score (same indicators/patterns/waves/breakout —
-    # no extra data fetch, just scored from the bearish angle) ───────────────
+    # no extra data fetch, just scored from the bearish angle). Unlike the LONG
+    # side, this is a genuinely short-specific strategy, not a mirror: volume
+    # requires distribution (down-candle-weighted, not just any spike), RSI
+    # requires a rollover trajectory (not just a static level), VWAP adds an
+    # intraday-native factor Elliott Wave (a swing tool) can't provide, and
+    # Elliott's own weight is reduced accordingly. See docs/TRADING_LOGIC.md §1a.
+    short_bias = _compute_short_bias_metrics(df_daily)
     short_scores = {
-        "volume":       _volume_score(indicators),   # a volume spike matters either direction
-        "rsi":          _rsi_score_short(indicators),
+        "volume":       _volume_score_short(indicators, short_bias),
+        "rsi":          _rsi_score_short(indicators, short_bias),
         "bollinger":    _bollinger_score_short(df_daily, indicators),
         "candlestick":  _candlestick_score_short(patterns),
         "macd":         _macd_score_short(indicators),
         "sma_trend":    _sma_trend_score_short(df_daily, indicators),
         "elliott_wave": _elliott_score_short(waves),
         "trendline":    _trendline_score_short(breakout_signal),
+        "vwap":         _vwap_score_short(short_bias),
         "fundamental":  _fundamental_score_contribution(fundamentals),
     }
     short_total = sum(short_scores.values())
@@ -456,16 +592,31 @@ def scan_symbol(
     # squared off same day — see trading_service.enter_trade's SHORT guard),
     # unlike the LONG side which can be SWING or INTRADAY.
     if short_signal in ("SELL", "STRONG SELL"):
-        # SL: above recent resistance or 3% above entry — whichever is tighter
-        sl_candidates = [current_price * 1.03]
+        atr = short_bias.get("atr")
+
+        # SL: entry + 1.0x ATR (floored at 0.8% so a very low-ATR name doesn't
+        # get a noise-width stop), or above recent resistance — whichever is
+        # tighter. Falls back to the old flat 3% only if ATR is unavailable.
+        if atr and atr > 0:
+            atr_sl_distance = max(SHORT_SL_ATR_MULT * atr, current_price * SHORT_SL_MIN_PCT)
+        else:
+            atr_sl_distance = current_price * 0.03
+        sl_candidates = [current_price + atr_sl_distance]
         if horizontal.get("resistance_levels"):
             nearest_res = horizontal["resistance_levels"][0]["price"]
             if nearest_res > current_price:
                 sl_candidates.append(nearest_res * 1.005)
         short_stop_loss = round(min(sl_candidates), 2)
 
-        # Target: nearest support or 8% below entry — whichever is nearer/more achievable
-        target_candidates = [current_price * 0.92]
+        # Target: entry - 1.8x ATR (capped at 5% — realistic for one session,
+        # was 8%), or nearest support — whichever is nearer/more achievable.
+        # Falls back to the old flat 8% (now capped at 5%) only if ATR is
+        # unavailable.
+        if atr and atr > 0:
+            atr_target_distance = min(SHORT_TARGET_ATR_MULT * atr, current_price * SHORT_TARGET_MAX_PCT)
+        else:
+            atr_target_distance = current_price * SHORT_TARGET_MAX_PCT
+        target_candidates = [current_price - atr_target_distance]
         if horizontal.get("support_levels"):
             nearest_sup = horizontal["support_levels"][0]["price"]
             if nearest_sup < current_price:
