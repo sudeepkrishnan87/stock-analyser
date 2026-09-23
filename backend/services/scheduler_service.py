@@ -61,6 +61,7 @@ def _estimate_dict(sig) -> dict:
         "investment": sig.est_investment,
         "available_funds": sig.est_available_funds,
         "is_hypothetical": sig.est_is_hypothetical,
+        "sizing_breakdown": sig.est_sizing_breakdown,
     }
 
 
@@ -154,6 +155,14 @@ def job_premarket_scan():
                     )
                     lines.append(alert_service.format_quantity_line(_estimate_dict(sig)))
                     lines += alert_service.format_action_lines(signal_service.build_action_links(sig.id))
+                elif r.get("trade_suggestion_rejected"):
+                    tr = r["trade_suggestion_rejected"]
+                    lines.append(
+                        f"   Entry: ₹{tr['entry']} | SL: ₹{tr['stop_loss']} | "
+                        f"Target: ₹{tr['target']} | R:R 1:{tr['rr_ratio']}"
+                    )
+                    lines.append(f"   ⚠️ Not actionable: {tr['reason']}")
+                lines.append("")
             body = "\n".join(lines)
             alert_service.send_alert("Pre-Market Top Picks", body)
             logger.info(f"[SCHEDULER] Pre-market scan found {len(results)} candidates.")
@@ -365,6 +374,13 @@ def job_swing_scan():
                     )
                     lines.append(alert_service.format_quantity_line(_estimate_dict(sig)))
                     lines += alert_service.format_action_lines(signal_service.build_action_links(sig.id))
+                elif r.get("trade_suggestion_rejected"):
+                    tr = r["trade_suggestion_rejected"]
+                    lines.append(
+                        f"   Entry: ₹{tr['entry']} | SL: ₹{tr['stop_loss']} | "
+                        f"Target: ₹{tr['target']} | R:R 1:{tr['rr_ratio']}"
+                    )
+                    lines.append(f"   ⚠️ Not actionable: {tr['reason']}")
                 if fund.get("pe_ratio"):
                     lines.append(
                         f"   PE: {fund['pe_ratio']} | "
@@ -375,6 +391,7 @@ def job_swing_scan():
                 if wave:
                     lw = wave[-1]
                     lines.append(f"   Elliott: Wave {lw['wave_number']} ({lw['wave_type']})")
+                lines.append("")
             alert_service.send_alert("Swing Setups for Tomorrow", "\n".join(lines))
     except Exception as e:
         logger.error(f"[SCHEDULER] Swing scan error: {e}")

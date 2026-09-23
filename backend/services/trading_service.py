@@ -255,6 +255,52 @@ def _effective_capital(broker: Optional[BaseBroker]) -> float:
         return _state.capital
 
 
+def _compute_funds_shortfall(
+    entry_price: float, deployed_capital: float, available_funds: Optional[float],
+    max_exposure_pct: float, risk_per_trade_pct: float, risk_per_share: float,
+) -> Dict:
+    """
+    How much MORE would need to land in the broker account for this exact
+    trade to size to at least 1 share, given today's numbers. All three
+    sizing constraints (risk / exposure / funds-cap) move together as funds
+    are added — effective_capital rises 1:1 with available_funds once it's
+    the binding term (see _effective_capital) — so there's one single top-up
+    amount that clears all three at once, found by taking whichever
+    constraint individually demands the most.
+    """
+    available = available_funds or 0.0
+
+    # Funds needed so shares_from_exposure >= 1:
+    #   (available + deployed) * max_exposure_pct - deployed >= entry_price
+    exposure_frac = max_exposure_pct / 100
+    needed_for_exposure = (
+        (entry_price + deployed_capital) / exposure_frac - deployed_capital
+        if exposure_frac > 0 else float("inf")
+    )
+
+    # Funds needed so shares_from_risk >= 1:
+    #   (available + deployed) * risk_pct >= risk_per_share
+    risk_frac = risk_per_trade_pct / 100
+    needed_for_risk = (
+        (risk_per_share / risk_frac) - deployed_capital
+        if risk_frac > 0 else float("inf")
+    )
+
+    # Funds needed so shares_from_funds >= 1 (only relevant if funds are known):
+    needed_for_funds_cap = entry_price
+
+    candidates = {
+        "exposure limit": needed_for_exposure,
+        "risk-per-trade minimum": needed_for_risk,
+        "funds cap": needed_for_funds_cap,
+    }
+    binding_reason = max(candidates, key=candidates.get)
+    required_available = max(candidates.values(), default=0)
+    shortfall = round(max(required_available - available, 0), 2)
+
+    return {"additional_funds_needed": shortfall, "shortfall_reason": binding_reason}
+
+
 def _position_size_breakdown(entry: float, stop_loss: float, broker: Optional[BaseBroker] = None) -> Dict:
     """
     Same math as calculate_position_size(), but keeps every intermediate number
@@ -289,7 +335,7 @@ def _position_size_breakdown(entry: float, stop_loss: float, broker: Optional[Ba
         candidates.append(shares_from_funds)
     final_shares = max(0, min(candidates)) if risk_per_share >= 0.01 else 0
 
-    return {
+    result = {
         "entry_price": round(entry, 2),
         "stop_loss": round(stop_loss, 2),
         "capital": round(capital, 2),
@@ -305,6 +351,15 @@ def _position_size_breakdown(entry: float, stop_loss: float, broker: Optional[Ba
         "shares_from_funds": shares_from_funds,
         "final_shares": final_shares,
     }
+
+    if final_shares == 0 and risk_per_share >= 0.01:
+        result.update(_compute_funds_shortfall(
+            entry_price=entry, deployed_capital=deployed_capital, available_funds=available_funds,
+            max_exposure_pct=settings.MAX_PORTFOLIO_EXPOSURE_PCT,
+            risk_per_trade_pct=settings.MAX_RISK_PER_TRADE_PCT, risk_per_share=risk_per_share,
+        ))
+
+    return result
 
 
 def calculate_position_size(entry: float, stop_loss: float, broker: Optional[BaseBroker] = None) -> int:
@@ -347,12 +402,19 @@ def estimate_quantity(entry_price: float, stop_loss: float) -> Dict:
         logger.warning(f"Could not fetch available funds for quantity estimate: {e}")
 
     if available_funds and available_funds > 0:
-        qty = calculate_position_size(entry_price, stop_loss, broker=broker)
+        breakdown = _position_size_breakdown(entry_price, stop_loss, broker=broker)
+        qty = breakdown["final_shares"]
         return {
             "quantity": qty,
             "investment": round(qty * entry_price, 2),
             "available_funds": round(available_funds, 2),
             "is_hypothetical": False,
+            # Full sizing math, only when it's actually needed to explain a 0 —
+            # lets alerts/the Signals tab show *why* and how much more funding
+            # would close the gap, before you ever click Approve. See
+            # _compute_funds_shortfall and the same breakdown shape already
+            # shipped on enter_trade()'s REJECTED result / Recent Decisions.
+            "sizing_breakdown": breakdown if qty == 0 else None,
         }
 
     risk_amount = HYPOTHETICAL_CAPITAL * (settings.MAX_RISK_PER_TRADE_PCT / 100)

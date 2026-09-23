@@ -551,6 +551,18 @@ def scan_symbol(
                 "trade_type": "INTRADAY" if rsi_val > 68 else "SWING",
                 "risk_reward": f"1:{rr}",
             }
+        else:
+            # Near-miss: the setup scored well enough to reach this block but the
+            # SL/target math doesn't clear the R:R bar. Surface the numbers and
+            # why instead of silently dropping them — see scheduler_service's
+            # trade_suggestion_rejected handling for where this is consumed.
+            result["trade_suggestion_rejected"] = {
+                "entry": round(current_price, 2),
+                "stop_loss": stop_loss,
+                "target": target,
+                "rr_ratio": rr,
+                "reason": f"R:R ratio 1:{rr} is below the 1.5 minimum needed to trade",
+            }
 
     # ── Short-side composite score (same indicators/patterns/waves/breakout —
     # no extra data fetch, just scored from the bearish angle). Unlike the LONG

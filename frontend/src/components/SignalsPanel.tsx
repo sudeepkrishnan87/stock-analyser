@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { PendingSignal } from "../types";
 import { approveSignal, rejectSignal } from "../api/client";
 import { SOURCE_LABEL, SOURCE_STYLE } from "../utils/tradeDisplay";
+import SizingMathTable from "./SizingMathTable";
 
 interface Props {
   signals: PendingSignal[];
@@ -130,6 +131,10 @@ export default function SignalsPanel({ signals, onResolved }: Props) {
               <span className="text-slate-500"> @ 2% risk, ₹{s.est_available_funds.toLocaleString("en-IN")} available</span>
             )}
           </p>
+
+          {s.est_quantity === 0 && s.est_sizing_breakdown && (
+            <SizingMathTable symbol={s.symbol} b={s.est_sizing_breakdown} />
+          )}
 
           {resultMsg[s.id] ? (
             <p className="mt-4 text-sm text-slate-300 bg-slate-900/60 rounded-lg px-3 py-2">

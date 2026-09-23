@@ -79,6 +79,7 @@ export interface PendingSignal {
   est_investment: number;
   est_available_funds: number;
   est_is_hypothetical: boolean;
+  est_sizing_breakdown?: SizingBreakdown | null;
   direction: "LONG" | "SHORT";
   resolution?: SignalResolution | null;
 }
@@ -101,6 +102,8 @@ export interface SizingBreakdown {
   shares_from_exposure: number;
   shares_from_funds: number | null;
   final_shares: number;
+  additional_funds_needed?: number | null;
+  shortfall_reason?: string | null;
 }
 
 export interface SignalResolution {

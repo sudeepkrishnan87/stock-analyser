@@ -182,7 +182,14 @@ def format_quantity_line(estimate: Optional[Dict]) -> str:
     funds = estimate.get("available_funds", 0)
     if estimate.get("is_hypothetical"):
         return f"   Est. Qty  : {qty} shares (₹{investment:,.0f}) — hypothetical @ ₹{funds:,.0f} balance, no live funds found"
-    return f"   Est. Qty  : {qty} shares (₹{investment:,.0f}) @ 2% risk, ₹{funds:,.0f} available"
+    line = f"   Est. Qty  : {qty} shares (₹{investment:,.0f}) @ 2% risk, ₹{funds:,.0f} available"
+    breakdown = estimate.get("sizing_breakdown")
+    if qty == 0 and breakdown and breakdown.get("additional_funds_needed"):
+        line += (
+            f"\n   💰 Top up ₹{breakdown['additional_funds_needed']:,.0f} to afford at least 1 share "
+            f"at this price ({breakdown.get('shortfall_reason', 'funds cap')})."
+        )
+    return line
 
 
 def format_action_lines(action_links: Optional[Dict[str, str]]) -> List[str]:

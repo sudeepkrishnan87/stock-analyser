@@ -1,59 +1,8 @@
 import { useEffect, useState } from "react";
-import type { PendingSignal, SizingBreakdown } from "../types";
+import type { PendingSignal } from "../types";
 import { getRecentSignals } from "../api/client";
 import { SOURCE_LABEL, SOURCE_STYLE } from "../utils/tradeDisplay";
-
-function fmtINR(n: number | null | undefined): string {
-  if (n === null || n === undefined) return "—";
-  return `₹${n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
-
-/**
- * The "shopping allowance" math table — same framing used to explain a real
- * rejection in chat, kept here so it's visible in the app itself afterwards
- * instead of needing to ask why every time. Mirrors
- * trading_service._position_size_breakdown() field-for-field.
- */
-function SizingMathTable({ symbol, b }: { symbol: string; b: SizingBreakdown }) {
-  return (
-    <div className="mt-3 bg-slate-900/60 rounded-lg border border-slate-700 p-3 text-xs">
-      <p className="text-slate-400 font-semibold mb-2">Why there wasn't room for {symbol}</p>
-      <table className="w-full">
-        <tbody className="divide-y divide-slate-800">
-          <tr>
-            <td className="py-1 text-slate-500">Your total money (free cash + already in stocks)</td>
-            <td className="py-1 text-right font-semibold text-slate-200">{fmtINR(b.effective_capital)}</td>
-          </tr>
-          <tr>
-            <td className="py-1 text-slate-500">Safety rule: never use more than</td>
-            <td className="py-1 text-right font-semibold text-slate-200">{b.max_exposure_pct}%</td>
-          </tr>
-          <tr>
-            <td className="py-1 text-slate-500">Already tied up in other stocks</td>
-            <td className="py-1 text-right font-semibold text-amber-400">{fmtINR(b.deployed_capital)}</td>
-          </tr>
-          <tr>
-            <td className="py-1 text-slate-500">Room left for something new</td>
-            <td className={`py-1 text-right font-bold ${b.max_deployable < b.entry_price ? "text-red-400" : "text-emerald-400"}`}>
-              {fmtINR(b.max_deployable)}
-            </td>
-          </tr>
-        </tbody>
-      </table>
-      <p className="text-slate-500 mt-2">
-        {symbol} needs at least <span className="text-slate-300 font-semibold">{fmtINR(b.entry_price)}</span> for
-        just 1 share, but only <span className="text-slate-300 font-semibold">{fmtINR(b.max_deployable)}</span> of
-        room was left — same rule as spending only 60% of an allowance and keeping 40% back as a cushion.
-      </p>
-      {b.available_funds !== null && (
-        <p className="text-slate-600 mt-1">
-          (Live Zerodha balance at the time: {fmtINR(b.available_funds)} free + {fmtINR(b.deployed_capital)} already
-          in stocks = {fmtINR(b.effective_capital)} total.)
-        </p>
-      )}
-    </div>
-  );
-}
+import SizingMathTable from "./SizingMathTable";
 
 function outcomeBadge(s: PendingSignal): { label: string; style: string } {
   if (s.status === "EXPIRED") return { label: "⏱ Expired — never actioned", style: "bg-slate-700/50 text-slate-400 border-slate-600" };

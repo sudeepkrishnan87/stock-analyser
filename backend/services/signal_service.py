@@ -56,6 +56,7 @@ class PendingSignal:
     est_investment: float = 0.0
     est_available_funds: float = 0.0
     est_is_hypothetical: bool = False
+    est_sizing_breakdown: Optional[Dict] = None
     direction: str = "LONG"    # LONG | SHORT — SHORT is always INTRADAY (see trading_service.enter_trade)
 
 
@@ -131,6 +132,7 @@ def add_pending_signal(
     sig.est_investment = estimate["investment"]
     sig.est_available_funds = estimate["available_funds"]
     sig.est_is_hypothetical = estimate["is_hypothetical"]
+    sig.est_sizing_breakdown = estimate.get("sizing_breakdown")
 
     _pending[sig.id] = sig
     logger.info(f"[SIGNALS] Queued {symbol} for approval ({source}, {signal}, score {signal_score})")
